@@ -23,12 +23,21 @@ type Publisher interface {
 	URL(ctx context.Context, port int) (string, error)
 }
 
+// Store remembers the ports this daemon published, so a later run can tell
+// them from the mappings the user made. A nil Store means no memory, and the
+// daemon then withdraws nothing it finds at startup.
+type Store interface {
+	Load() (map[int]bool, error)
+	Save(ports []int) error
+}
+
 // Daemon watches local ports and mirrors them onto the tailnet.
 type Daemon struct {
 	Cfg       config.Config
 	Sources   []discover.Source
 	Pub       Publisher
 	Notifiers []notify.Notifier
+	Store     Store
 	DryRun    bool
 
 	detector agent.Detector
@@ -76,49 +85,85 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
-// reclaim sorts out what is already in the serve config at startup. A port
-// that is no longer listening cannot be anybody's working setup, so it goes:
-// it is leftover from a run of this daemon that died. A port that is still
-// listening stays, and is remembered as foreign.
+// reclaim sorts out what is already in the serve config at startup.
 //
-// ipn.ServeConfig records no author, so a live mapping we did not make this
-// run is indistinguishable from one the user typed by hand. The daemon
-// therefore never publishes over it and never withdraws it -- otherwise a
-// `tailscale serve 3000` set up by hand would be adopted on the first poll and
-// silently deleted the moment that server stopped.
+// Only the ports the last run wrote down are the daemon's to clean up. One of
+// those that is still listening is re-adopted; one whose server is gone is
+// litter from a run that died, and goes. Everything else in the config belongs
+// to the user -- a `tailscale serve` is persistent, and the server behind it is
+// often stopped at the moment this daemon starts, so "nothing is listening on
+// it" says nothing about who put it there. Those are remembered as foreign:
+// never published over, never withdrawn.
 func (d *Daemon) reclaim(ctx context.Context) error {
 	published, err := d.Pub.Published(ctx)
 	if err != nil {
 		return err
 	}
-	// Every listening port, not just the ones policy would publish: a mapping
-	// the user made for a port outside dev range is still theirs.
+	mine, err := d.remembered()
+	if err != nil {
+		// The state file is the only record of what is ours. Without it,
+		// withdrawing nothing is the safe way to be wrong.
+		slog.Warn("cannot read state; leaving every existing mapping alone", "err", err)
+		mine = nil
+	}
 	listening, err := d.listening(ctx)
 	if err != nil {
 		return err
 	}
+
 	var stale []int
 	for port := range published {
-		if listening[port] {
+		if !mine[port] {
 			d.foreign[port] = true
+			continue
+		}
+		// Ours. Keep it only if it still has a server and the config still
+		// wants that port published: an exclusion added since the last run
+		// takes effect now rather than whenever the server happens to stop.
+		if l, ok := listening[port]; ok && d.wanted(l) {
+			d.owned[port] = &entry{proc: l.Proc, source: l.Source}
+			slog.Info("re-adopted", "port", port, "proc", l.Proc)
 			continue
 		}
 		stale = append(stale, port)
 	}
 	sort.Ints(stale)
-	if len(stale) == 0 {
-		return nil
+	if len(stale) > 0 {
+		if d.DryRun {
+			slog.Info("would withdraw stale mappings", "ports", stale)
+			return nil
+		}
+		if err := d.Pub.Withdraw(ctx, stale); err != nil {
+			slog.Warn("withdraw failed", "ports", stale, "err", err)
+		} else {
+			slog.Info("withdrew stale mappings", "ports", stale)
+		}
 	}
-	if d.DryRun {
-		slog.Info("would withdraw stale mappings", "ports", stale)
-		return nil
-	}
-	if err := d.Pub.Withdraw(ctx, stale); err != nil {
-		slog.Warn("withdraw failed", "ports", stale, "err", err)
-		return nil
-	}
-	slog.Info("withdrew stale mappings", "ports", stale)
+	d.save()
 	return nil
+}
+
+func (d *Daemon) remembered() (map[int]bool, error) {
+	if d.Store == nil {
+		return nil, nil
+	}
+	return d.Store.Load()
+}
+
+// save records what the daemon currently has published, so a run that is killed
+// rather than stopped still leaves the next one able to clean up after it.
+func (d *Daemon) save() {
+	if d.Store == nil || d.DryRun {
+		return
+	}
+	ports := make([]int, 0, len(d.owned))
+	for port := range d.owned {
+		ports = append(ports, port)
+	}
+	sort.Ints(ports)
+	if err := d.Store.Save(ports); err != nil {
+		slog.Warn("cannot write state", "err", err)
+	}
 }
 
 // Poll runs one reconciliation pass.
@@ -129,7 +174,10 @@ func (d *Daemon) Poll(ctx context.Context) error {
 	}
 
 	fresh := d.publishNew(ctx, live)
-	d.withdrawGone(ctx, live)
+	gone := d.withdrawGone(ctx, live)
+	if len(fresh) > 0 || gone > 0 {
+		d.save()
+	}
 
 	if !d.started {
 		d.started = true
@@ -211,8 +259,9 @@ func (d *Daemon) publishNew(ctx context.Context, live map[int]discover.Listener)
 	return fresh
 }
 
-// withdrawGone drops the ports we own that have been absent for the grace period.
-func (d *Daemon) withdrawGone(ctx context.Context, live map[int]discover.Listener) {
+// withdrawGone drops the ports we own that have been absent for the grace
+// period, and reports how many went.
+func (d *Daemon) withdrawGone(ctx context.Context, live map[int]discover.Listener) int {
 	var expired []int
 	for port, e := range d.owned {
 		if _, ok := live[port]; ok {
@@ -225,12 +274,12 @@ func (d *Daemon) withdrawGone(ctx context.Context, live map[int]discover.Listene
 		expired = append(expired, port)
 	}
 	if len(expired) == 0 {
-		return
+		return 0
 	}
 	sort.Ints(expired)
 	if err := d.Pub.Withdraw(ctx, expired); err != nil {
 		slog.Error("withdraw failed", "ports", expired, "err", err)
-		return
+		return 0
 	}
 	for _, port := range expired {
 		e := d.owned[port]
@@ -241,6 +290,7 @@ func (d *Daemon) withdrawGone(ctx context.Context, live map[int]discover.Listene
 			Text: fmt.Sprintf("port %d is gone", port),
 		})
 	}
+	return len(expired)
 }
 
 // shutdown withdraws every mapping this run created, so a stopped daemon does
@@ -257,36 +307,18 @@ func (d *Daemon) shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := d.Pub.Withdraw(ctx, ports); err != nil {
+		// Leave the state file alone: the next run inherits the cleanup.
 		slog.Warn("withdraw on shutdown failed", "ports", ports, "err", err)
+		return
 	}
+	d.owned = map[int]*entry{}
+	d.save()
 }
 
-// listening reports every port with a local listener, before any policy is
-// applied. reclaim needs the unfiltered view: a mapping for a port the config
-// would not publish is by definition not one the daemon made.
-func (d *Daemon) listening(ctx context.Context) (map[int]bool, error) {
-	out := map[int]bool{}
-	var firstErr error
-	for _, src := range d.Sources {
-		ls, err := src.Listeners(ctx)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("source %s: %w", src.Name(), err)
-			}
-			continue
-		}
-		for _, l := range ls {
-			out[l.Port] = true
-		}
-	}
-	if len(out) == 0 && firstErr != nil {
-		return nil, firstErr
-	}
-	return out, nil
-}
-
-// candidates asks every source what is listening and keeps what the policy wants.
-func (d *Daemon) candidates(ctx context.Context) (map[int]discover.Listener, error) {
+// listening reports every local listener, before any policy is applied.
+// reclaim needs the unfiltered view, because a port the config would not
+// publish today may still be one this daemon published yesterday.
+func (d *Daemon) listening(ctx context.Context) (map[int]discover.Listener, error) {
 	out := map[int]discover.Listener{}
 	var firstErr error
 	for _, src := range d.Sources {
@@ -298,9 +330,6 @@ func (d *Daemon) candidates(ctx context.Context) (map[int]discover.Listener, err
 			continue
 		}
 		for _, l := range ls {
-			if !d.wanted(l) {
-				continue
-			}
 			if _, dup := out[l.Port]; !dup {
 				out[l.Port] = l
 			}
@@ -308,6 +337,21 @@ func (d *Daemon) candidates(ctx context.Context) (map[int]discover.Listener, err
 	}
 	if len(out) == 0 && firstErr != nil {
 		return nil, firstErr
+	}
+	return out, nil
+}
+
+// candidates asks every source what is listening and keeps what the policy wants.
+func (d *Daemon) candidates(ctx context.Context) (map[int]discover.Listener, error) {
+	all, err := d.listening(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]discover.Listener, len(all))
+	for port, l := range all {
+		if d.wanted(l) {
+			out[port] = l
+		}
 	}
 	return out, nil
 }

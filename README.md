@@ -104,6 +104,12 @@ on every platform including macOS:
 
 or wherever `-config` points.
 
+The daemon also keeps a state file — `$XDG_STATE_HOME/ts-autoserve/state.json`,
+or `~/.local/state/ts-autoserve/state.json` — listing the ports it currently
+has published. That list is how a later run tells its own mappings from yours;
+nothing is meant to be edited there. Delete it and the daemon simply forgets
+what was its, and cleans up nothing it finds.
+
 ```yaml
 mode: both          # dev | agent | both | all
 interval: 5s        # how often to poll
@@ -155,13 +161,14 @@ it work before handing it to the OS.
 ## What it will not do
 
 - **Touch mappings it did not create.** A `tailscale serve` you set up by hand
-  is left alone for as long as its port is still listening: the daemon neither
-  publishes over it nor withdraws it when the server stops. The serve config
-  records no author, so anything already mapped to a live port is treated as
-  yours, including a mapping made while the daemon is running.
+  is left alone: never published over, never withdrawn, whether or not its
+  server happens to be running. The serve config records no author, so the
+  daemon goes by its own state file instead — anything it did not write down
+  as its own is yours, including a mapping made while it is running.
 - **Expose anything publicly.** It only uses Serve (tailnet-only), never Funnel.
 - **Outlive itself.** On shutdown it withdraws what it published; on startup it
-  clears mappings left behind by a previous run whose ports are gone.
+  clears what a previous run left behind — only what that run recorded as its
+  own, and only where the port has stopped listening.
 
 ## Roadmap
 

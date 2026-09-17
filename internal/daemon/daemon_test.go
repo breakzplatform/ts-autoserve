@@ -54,6 +54,31 @@ func (f *fakePub) URL(_ context.Context, port int) (string, error) {
 	return fmt.Sprintf("https://node.example.ts.net:%d/", port), nil
 }
 
+// fakeStore stands in for the state file: what the last run published.
+type fakeStore struct {
+	ports []int
+	saved []int
+	saves int
+	err   error
+}
+
+func (f *fakeStore) Load() (map[int]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := map[int]bool{}
+	for _, p := range f.ports {
+		out[p] = true
+	}
+	return out, nil
+}
+
+func (f *fakeStore) Save(ports []int) error {
+	f.saved = append([]int(nil), ports...)
+	f.saves++
+	return nil
+}
+
 type fakeSource struct{ ports []int }
 
 func (fakeSource) Name() string { return "fake" }
@@ -181,13 +206,14 @@ func TestFailedPublishIsRetriedNextPoll(t *testing.T) {
 	}
 }
 
-func TestReclaimDropsStaleMappingsButKeepsLiveOnes(t *testing.T) {
+func TestReclaimDropsOurStaleMappingsAndReAdoptsOurLiveOnes(t *testing.T) {
 	cfg := testConfig(t)
 	src := &fakeSource{ports: []int{3000}}
 	pub := newFakePub()
 	pub.published[3000] = true // still listening: ours to re-adopt
 	pub.published[4444] = true // gone: stale from an earlier run
 	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = &fakeStore{ports: []int{3000, 4444}}
 
 	if err := d.reclaim(context.Background()); err != nil {
 		t.Fatalf("reclaim: %v", err)
@@ -195,8 +221,148 @@ func TestReclaimDropsStaleMappingsButKeepsLiveOnes(t *testing.T) {
 	if !pub.published[3000] {
 		t.Errorf("live port 3000 was withdrawn")
 	}
+	if d.owned[3000] == nil {
+		t.Errorf("live port 3000 was not re-adopted")
+	}
 	if pub.published[4444] {
 		t.Errorf("stale port 4444 survived reclaim")
+	}
+}
+
+func TestReclaimKeepsAPersistentMappingWhoseServerIsDown(t *testing.T) {
+	cfg := testConfig(t)
+	src := &fakeSource{ports: nil} // nothing is listening: fresh boot
+	pub := newFakePub()
+	pub.published[8000] = true // `tailscale serve 8000`, set up to live there
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = &fakeStore{} // this daemon published nothing last run
+
+	if err := d.reclaim(context.Background()); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if !pub.published[8000] {
+		t.Fatalf("deleted a mapping the daemon never made")
+	}
+
+	// And it stays out of reach once the user's server does come up.
+	src.ports = []int{8000}
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(pub.publishes) != 0 {
+		t.Errorf("published over it once its server appeared: %v", pub.publishes)
+	}
+}
+
+func TestReAdoptedPortIsWithdrawnWhenItsServerStops(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	src := &fakeSource{ports: []int{3000}}
+	pub := newFakePub()
+	pub.published[3000] = true
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = &fakeStore{ports: []int{3000}}
+
+	if err := d.reclaim(ctx); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	src.ports = nil
+	for i := 0; i < cfg.Grace+1; i++ {
+		if err := d.Poll(ctx); err != nil {
+			t.Fatalf("Poll: %v", err)
+		}
+	}
+	if pub.published[3000] {
+		t.Errorf("a mapping this daemon owns outlived its server")
+	}
+}
+
+func TestReclaimDropsOurMappingForAPortNowExcluded(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeAll
+	src := &fakeSource{ports: []int{9222}} // listening, but excluded by config
+	pub := newFakePub()
+	pub.published[9222] = true
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = &fakeStore{ports: []int{9222}}
+
+	if err := d.reclaim(context.Background()); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if pub.published[9222] {
+		t.Errorf("an exclusion added since the last run was not applied")
+	}
+}
+
+func TestUnreadableStateWithdrawsNothing(t *testing.T) {
+	cfg := testConfig(t)
+	src := &fakeSource{ports: nil}
+	pub := newFakePub()
+	pub.published[3000] = true
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = &fakeStore{err: fmt.Errorf("corrupt")}
+
+	if err := d.reclaim(context.Background()); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if !pub.published[3000] {
+		t.Errorf("withdrew a mapping without knowing whose it was")
+	}
+}
+
+func TestStateFollowsWhatIsPublished(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	src := &fakeSource{ports: []int{3000}}
+	pub := newFakePub()
+	store := &fakeStore{}
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = store
+
+	if err := d.Poll(ctx); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(store.saved) != 1 || store.saved[0] != 3000 {
+		t.Fatalf("state = %v, want [3000]", store.saved)
+	}
+
+	src.ports = nil
+	for i := 0; i < cfg.Grace+1; i++ {
+		if err := d.Poll(ctx); err != nil {
+			t.Fatalf("Poll: %v", err)
+		}
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("state = %v, want empty once the port is withdrawn", store.saved)
+	}
+
+	// A poll that changes nothing does not rewrite the file.
+	saves := store.saves
+	if err := d.Poll(ctx); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if store.saves != saves {
+		t.Errorf("state written on a poll that changed nothing")
+	}
+}
+
+func TestShutdownClearsTheState(t *testing.T) {
+	cfg := testConfig(t)
+	src := &fakeSource{ports: []int{3000}}
+	pub := newFakePub()
+	store := &fakeStore{}
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.Store = store
+
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	d.shutdown()
+	if pub.published[3000] {
+		t.Errorf("shutdown left port 3000 published")
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("state = %v, want empty after shutdown", store.saved)
 	}
 }
 

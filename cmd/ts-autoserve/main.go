@@ -22,6 +22,7 @@ import (
 	"github.com/breakzplatform/ts-autoserve/internal/discover"
 	"github.com/breakzplatform/ts-autoserve/internal/notify"
 	"github.com/breakzplatform/ts-autoserve/internal/service"
+	"github.com/breakzplatform/ts-autoserve/internal/state"
 	"github.com/breakzplatform/ts-autoserve/internal/tsserve"
 )
 
@@ -196,10 +197,12 @@ func run(cfgPath string, once, dryRun bool) error {
 
 	d := daemon.New(cfg, []discover.Source{discover.Host{}}, pub, notify.FromConfig(cfg.Notify))
 	d.DryRun = dryRun
+	d.Store = state.New(state.DefaultPath())
 
 	slog.Info("ts-autoserve starting",
 		"version", version, "node", host, "mode", cfg.Mode,
-		"interval", cfg.Interval, "grace", cfg.Grace, "dry_run", dryRun)
+		"interval", cfg.Interval, "grace", cfg.Grace, "dry_run", dryRun,
+		"state", state.DefaultPath())
 
 	if once {
 		return d.Poll(ctx)
