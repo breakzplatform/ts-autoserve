@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -90,11 +91,20 @@ func (t *telegram) Notify(ctx context.Context, ev Event) error {
 	if err != nil {
 		return sendErr("telegram", err)
 	}
-	defer resp.Body.Close()
+	defer drain(resp)
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("telegram returned %s", resp.Status)
 	}
 	return nil
+}
+
+// drain finishes the response body before closing it. net/http only returns a
+// connection to the keep-alive pool once its body is read out, and these
+// bodies -- a Telegram ack, a webhook's reply -- are small and unread. Without
+// this, every notification pays for a new TCP and TLS handshake.
+func drain(resp *http.Response) {
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
 }
 
 // sendErr reports why a request failed without repeating the URL it was sent
@@ -126,7 +136,7 @@ func (w *webhook) Notify(ctx context.Context, ev Event) error {
 	if err != nil {
 		return sendErr("webhook", err)
 	}
-	defer resp.Body.Close()
+	defer drain(resp)
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("webhook returned %s", resp.Status)
 	}

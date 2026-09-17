@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/breakzplatform/ts-autoserve/internal/config"
@@ -130,5 +133,35 @@ func TestSendErrKeepsTheCauseAndDropsTheURL(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), token) {
 		t.Errorf("error leaked the token: %q", err)
+	}
+}
+
+func TestNotificationsReuseTheConnection(t *testing.T) {
+	var conns int32
+	// A body big enough that net/http will not quietly finish it for us when
+	// an unread one is closed: past that size, only an explicit drain frees
+	// the connection for the next notification.
+	body := `{"ok":true,"description":"` + strings.Repeat("x", 32<<10) + `"}`
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, body)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			atomic.AddInt32(&conns, 1)
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+
+	tg := &telegram{token: "secret", chatID: "42", endpoint: srv.URL}
+	for i := 0; i < 3; i++ {
+		if err := tg.Notify(context.Background(), Event{Kind: "up", Text: "hi"}); err != nil {
+			t.Fatalf("Notify: %v", err)
+		}
+	}
+	// The body is read out before it is closed, so all three go down one
+	// connection instead of paying for a handshake each.
+	if got := atomic.LoadInt32(&conns); got != 1 {
+		t.Errorf("opened %d connections for 3 notifications, want 1", got)
 	}
 }
