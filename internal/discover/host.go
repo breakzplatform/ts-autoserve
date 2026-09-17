@@ -3,6 +3,8 @@ package discover
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/netip"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -93,19 +95,31 @@ var ssProc = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+)`)
 
 // localPort accepts the address forms that mean "reachable on this machine":
 // wildcard (*:3000, 0.0.0.0:3000, [::]:3000) and loopback (127.0.0.1, [::1]).
+// The parsing is left to the standard library, so an IPv6 address carrying an
+// interface zone -- [::1%lo0], which macOS lsof writes -- still counts.
 func localPort(addr string) (int, bool) {
-	i := strings.LastIndex(addr, ":")
-	if i < 0 {
-		return 0, false
-	}
-	host, portStr := addr[:i], addr[i+1:]
-	switch host {
-	case "*", "0.0.0.0", "[::]", "::", "127.0.0.1", "[::1]", "::1", "localhost", "[::ffff:127.0.0.1]":
-	default:
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
 		return 0, false
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+	switch host {
+	case "", "*", "localhost": // wildcard as lsof and ss spell it
+		return port, true
+	}
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i] // drop the zone: ::1%lo0 -> ::1
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return 0, false
+	}
+	// Unmap first, so ::ffff:127.0.0.1 answers IsLoopback.
+	ip = ip.Unmap()
+	if !ip.IsLoopback() && !ip.IsUnspecified() {
 		return 0, false
 	}
 	return port, true
