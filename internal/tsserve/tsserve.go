@@ -18,7 +18,7 @@ import (
 // Client publishes and withdraws HTTPS proxies for local ports.
 type Client struct {
 	lc     local.Client
-	dnsSuf string // cached MagicDNS name, e.g. "laptop.tailnet.ts.net"
+	dnsSuf string // cached MagicDNS name, e.g. "laptop.example-tailnet.ts.net"
 }
 
 // New returns a client bound to the local tailscaled.
