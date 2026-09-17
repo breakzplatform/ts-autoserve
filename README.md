@@ -75,8 +75,9 @@ ts-autoserve -once -dry-run
 Then install it as a service — one command, no file to copy:
 
 ```bash
-ts-autoserve install     # launchd on macOS, systemd --user on Linux
-ts-autoserve uninstall   # stop it and remove the service file
+ts-autoserve service install     # launchd on macOS, systemd --user on Linux
+ts-autoserve service status      # installed? running? which file, which config?
+ts-autoserve service uninstall   # stop it and remove the service file
 ```
 
 It writes the service file pointing at the binary you ran, starts it, and keeps
@@ -84,7 +85,7 @@ it running: **it comes back at login and restarts if it dies.** On a headless
 Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
 user service starts at boot.
 
-If a notification token is configured through `token_env`, `install` copies its
+If a notification token is configured through `token_env`, `service install` copies its
 current value into the service definition, which is written mode 600 — a service
 does not inherit your shell's environment.
 
@@ -133,11 +134,15 @@ The webhook receives one JSON object per event:
 ## Commands and flags
 
 ```
-ts-autoserve [flags]     run the daemon
-ts-autoserve install     install and start the user service
-ts-autoserve uninstall   stop the user service and remove it
-ts-autoserve version     print version
+ts-autoserve [flags]              run the daemon
+ts-autoserve service install      install and start it as a user service
+ts-autoserve service uninstall    stop the user service and remove it
+ts-autoserve service status       is the service installed and running?
+ts-autoserve version              print version
 ```
+
+Running it with no command runs the daemon in the foreground — useful to watch
+it work before handing it to the OS.
 
 | Flag | Meaning |
 |---|---|

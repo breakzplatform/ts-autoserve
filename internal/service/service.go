@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Label identifies the service to the OS.
@@ -66,12 +67,31 @@ func installLaunchd(binPath string, env map[string]string) (string, error) {
 	}
 
 	target := "gui/" + strconv.Itoa(os.Getuid())
-	// bootout first so reinstalling picks up a changed plist.
+	// bootout first so reinstalling picks up a changed plist. bootout returns
+	// before launchd has finished tearing the job down, and bootstrapping a
+	// label that is still present fails with "Input/output error" — so wait for
+	// the old job to disappear instead of racing it.
 	_ = run("launchctl", "bootout", target+"/"+Label)
-	if err := run("launchctl", "bootstrap", target, path); err != nil {
-		return path, fmt.Errorf("launchctl bootstrap: %w", err)
+	waitGone(target + "/" + Label)
+
+	var bootErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if bootErr = run("launchctl", "bootstrap", target, path); bootErr == nil {
+			return path, nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}
-	return path, nil
+	return path, fmt.Errorf("launchctl bootstrap: %w", bootErr)
+}
+
+// waitGone blocks until launchd no longer knows the service, or two seconds pass.
+func waitGone(target string) {
+	for i := 0; i < 20; i++ {
+		if err := run("launchctl", "print", target); err != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func uninstallLaunchd() (string, error) {
@@ -230,4 +250,59 @@ func run(name string, args ...string) error {
 		return fmt.Errorf("%s: %s", err, msg)
 	}
 	return nil
+}
+
+// State describes whether the service is installed and running.
+type State struct {
+	Installed bool
+	Running   bool
+	Path      string
+	Detail    string // PID, "not loaded", or whatever the OS reports
+}
+
+// Status reports the current state of the user service.
+func Status() (State, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return State{}, err
+	}
+	var st State
+	switch runtime.GOOS {
+	case "darwin":
+		st.Path = filepath.Join(home, "Library", "LaunchAgents", Label+".plist")
+		st.Installed = exists(st.Path)
+		out, err := exec.Command("launchctl", "list").Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if !strings.HasSuffix(line, Label) {
+					continue
+				}
+				f := strings.Fields(line)
+				if len(f) >= 1 && f[0] != "-" {
+					st.Running = true
+					st.Detail = "pid " + f[0]
+				} else {
+					st.Detail = "loaded, not running"
+				}
+			}
+		}
+	case "linux":
+		st.Path = filepath.Join(home, ".config", "systemd", "user", UnitName)
+		st.Installed = exists(st.Path)
+		out, _ := exec.Command("systemctl", "--user", "is-active", UnitName).Output()
+		state := strings.TrimSpace(string(out))
+		st.Running = state == "active"
+		st.Detail = state
+	default:
+		return State{}, fmt.Errorf("service status is not supported on %s", runtime.GOOS)
+	}
+	if st.Detail == "" {
+		st.Detail = "not loaded"
+	}
+	return st, nil
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

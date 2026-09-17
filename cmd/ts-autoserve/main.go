@@ -29,15 +29,22 @@ import (
 var version = "dev"
 
 func main() {
-	// Commands come first, flags after: installing is an action, not an option.
-	//   ts-autoserve                 run the daemon
-	//   ts-autoserve install         install and start the user service
-	//   ts-autoserve uninstall       stop and remove it
+	// Commands come first, flags after. Everything about the OS service is
+	// grouped under "service", because that is a different subject from the
+	// daemon's own work: "service status" is whether the daemon is running,
+	// while a later plain "status" will be what it has published.
+	//   ts-autoserve                      run the daemon
+	//   ts-autoserve service install      install and start the user service
+	//   ts-autoserve service uninstall    stop and remove it
+	//   ts-autoserve service status       is it installed and running?
 	//   ts-autoserve version
-	cmd := ""
+	cmd, sub := "", ""
 	args := os.Args[1:]
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
+	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
 	}
 
 	fs := flag.NewFlagSet("ts-autoserve", flag.ExitOnError)
@@ -62,10 +69,8 @@ func main() {
 	switch cmd {
 	case "":
 		err = run(*cfgPath, *once, *dryRun)
-	case "install":
-		err = manageService(true)
-	case "uninstall":
-		err = manageService(false)
+	case "service":
+		err = serviceCommand(sub, fs)
 	case "version":
 		fmt.Println("ts-autoserve", version)
 	case "help":
@@ -86,14 +91,47 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprint(os.Stderr, `ts-autoserve publishes local dev servers on your tailnet.
 
 Usage:
-  ts-autoserve [flags]        run the daemon
-  ts-autoserve install        install and start the user service
-  ts-autoserve uninstall      stop the user service and remove it
-  ts-autoserve version        print version
+  ts-autoserve [flags]              run the daemon
+  ts-autoserve service install      install and start it as a user service
+  ts-autoserve service uninstall    stop the user service and remove it
+  ts-autoserve service status       is the service installed and running?
+  ts-autoserve version              print version
 
 Flags:
 `)
 		fs.PrintDefaults()
+	}
+}
+
+// serviceCommand handles everything about running as an OS service.
+func serviceCommand(sub string, fs *flag.FlagSet) error {
+	switch sub {
+	case "install":
+		return manageService(true)
+	case "uninstall":
+		return manageService(false)
+	case "status":
+		st, err := service.Status()
+		if err != nil {
+			return err
+		}
+		state := "not installed"
+		switch {
+		case st.Installed && st.Running:
+			state = "running"
+		case st.Installed:
+			state = "installed, not running"
+		}
+		fmt.Printf("service: %s (%s)\n", state, st.Detail)
+		fmt.Println("file:", st.Path)
+		fmt.Println("config:", config.DefaultPath())
+		return nil
+	case "":
+		fs.Usage()
+		return fmt.Errorf("service needs a subcommand: install, uninstall or status")
+	default:
+		fs.Usage()
+		return fmt.Errorf("unknown service subcommand %q", sub)
 	}
 }
 
