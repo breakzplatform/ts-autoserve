@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -87,14 +88,26 @@ func (t *telegram) Notify(ctx context.Context, ev Event) error {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {
-		// The token must not reach the logs through the URL in the error.
-		return fmt.Errorf("telegram request failed")
+		return sendErr("telegram", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("telegram returned %s", resp.Status)
 	}
 	return nil
+}
+
+// sendErr reports why a request failed without repeating the URL it was sent
+// to: the Telegram token sits in that path, and a webhook URL is often a secret
+// of its own. *url.Error wraps the cause and holds the URL separately, so
+// unwrapping it keeps the part worth debugging -- timeout, DNS failure, TLS
+// handshake, EOF -- and drops the part worth hiding.
+func sendErr(what string, err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		return fmt.Errorf("%s request failed: %v", what, ue.Err)
+	}
+	return fmt.Errorf("%s request failed", what)
 }
 
 type webhook struct{ url string }
@@ -111,7 +124,7 @@ func (w *webhook) Notify(ctx context.Context, ev Event) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("webhook request failed")
+		return sendErr("webhook", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {

@@ -3,9 +3,11 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/breakzplatform/ts-autoserve/internal/config"
@@ -113,4 +115,20 @@ func contains(haystack, needle string) bool {
 			}
 			return false
 		})()
+}
+
+func TestSendErrKeepsTheCauseAndDropsTheURL(t *testing.T) {
+	const token = "123456:super-secret"
+	cause := errors.New("dial tcp: i/o timeout")
+	err := sendErr("telegram", &url.Error{
+		Op:  "Post",
+		URL: "https://api.telegram.org/bot" + token + "/sendMessage",
+		Err: cause,
+	})
+	if got := err.Error(); !strings.Contains(got, cause.Error()) {
+		t.Errorf("error = %q, want it to name the cause", got)
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("error leaked the token: %q", err)
+	}
 }
