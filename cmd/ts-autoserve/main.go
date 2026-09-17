@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/breakzplatform/ts-autoserve/internal/config"
@@ -28,28 +29,27 @@ import (
 var version = "dev"
 
 func main() {
-	var (
-		cfgPath     = flag.String("config", config.DefaultPath(), "path to config.yaml")
-		once        = flag.Bool("once", false, "run a single pass and exit")
-		dryRun      = flag.Bool("dry-run", false, "report what would be published, change nothing")
-		showVersion = flag.Bool("version", false, "print version and exit")
-		verbose     = flag.Bool("v", false, "debug logging")
-		install     = flag.Bool("install", false, "install as a user service (launchd or systemd) and start it")
-		uninstall   = flag.Bool("uninstall", false, "stop the user service and remove it")
-	)
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println("ts-autoserve", version)
-		return
+	// Commands come first, flags after: installing is an action, not an option.
+	//   ts-autoserve                 run the daemon
+	//   ts-autoserve install         install and start the user service
+	//   ts-autoserve uninstall       stop and remove it
+	//   ts-autoserve version
+	cmd := ""
+	args := os.Args[1:]
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		cmd, args = args[0], args[1:]
 	}
 
-	if *install || *uninstall {
-		if err := manageService(*install); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		return
+	fs := flag.NewFlagSet("ts-autoserve", flag.ExitOnError)
+	fs.Usage = usage(fs)
+	var (
+		cfgPath = fs.String("config", config.DefaultPath(), "path to config.yaml")
+		once    = fs.Bool("once", false, "run a single pass and exit")
+		dryRun  = fs.Bool("dry-run", false, "report what would be published, change nothing")
+		verbose = fs.Bool("v", false, "debug logging")
+	)
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
 	}
 
 	level := slog.LevelInfo
@@ -58,9 +58,42 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
-	if err := run(*cfgPath, *once, *dryRun); err != nil {
+	var err error
+	switch cmd {
+	case "":
+		err = run(*cfgPath, *once, *dryRun)
+	case "install":
+		err = manageService(true)
+	case "uninstall":
+		err = manageService(false)
+	case "version":
+		fmt.Println("ts-autoserve", version)
+	case "help":
+		fs.Usage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
+		fs.Usage()
+		os.Exit(2)
+	}
+	if err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
+	}
+}
+
+func usage(fs *flag.FlagSet) func() {
+	return func() {
+		fmt.Fprint(os.Stderr, `ts-autoserve publishes local dev servers on your tailnet.
+
+Usage:
+  ts-autoserve [flags]        run the daemon
+  ts-autoserve install        install and start the user service
+  ts-autoserve uninstall      stop the user service and remove it
+  ts-autoserve version        print version
+
+Flags:
+`)
+		fs.PrintDefaults()
 	}
 }
 

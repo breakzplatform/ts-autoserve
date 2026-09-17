@@ -75,8 +75,8 @@ ts-autoserve -once -dry-run
 Then install it as a service — one command, no file to copy:
 
 ```bash
-ts-autoserve -install     # launchd on macOS, systemd --user on Linux
-ts-autoserve -uninstall   # stop it and remove the service file
+ts-autoserve install     # launchd on macOS, systemd --user on Linux
+ts-autoserve uninstall   # stop it and remove the service file
 ```
 
 It writes the service file pointing at the binary you ran, starts it, and keeps
@@ -84,7 +84,7 @@ it running: **it comes back at login and restarts if it dies.** On a headless
 Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
 user service starts at boot.
 
-If a notification token is configured through `token_env`, `-install` copies its
+If a notification token is configured through `token_env`, `install` copies its
 current value into the service definition, which is written mode 600 — a service
 does not inherit your shell's environment.
 
@@ -130,17 +130,21 @@ The webhook receives one JSON object per event:
 {"kind":"up","port":5173,"url":"https://laptop.example-tailnet.ts.net:5173/","proc":"node","source":"host","text":"node up on port 5173\nhttps://..."}
 ```
 
-## Flags
+## Commands and flags
+
+```
+ts-autoserve [flags]     run the daemon
+ts-autoserve install     install and start the user service
+ts-autoserve uninstall   stop the user service and remove it
+ts-autoserve version     print version
+```
 
 | Flag | Meaning |
 |---|---|
-| `-config PATH` | config file (default: per-OS config dir) |
+| `-config PATH` | config file (default: first path that exists, see above) |
 | `-once` | single pass, then exit |
 | `-dry-run` | report what would change, change nothing |
 | `-v` | debug logging |
-| `-version` | print version |
-| `-install` | install and start the user service |
-| `-uninstall` | stop and remove the user service |
 
 ## What it will not do
 
