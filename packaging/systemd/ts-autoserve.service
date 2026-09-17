@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish local dev servers on the tailnet
+Documentation=https://github.com/breakzplatform/ts-autoserve
+After=tailscaled.service
+
+[Service]
+ExecStart=%h/go/bin/ts-autoserve
+Restart=always
+RestartSec=5
+# Telegram token, if you use it. Keep the file at mode 600.
+# EnvironmentFile=%h/.config/ts-autoserve/env
+
+[Install]
+WantedBy=default.target

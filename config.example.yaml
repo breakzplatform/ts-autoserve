@@ -1,0 +1,36 @@
+# ts-autoserve — every field is optional; defaults are in README.md.
+mode: both          # dev | agent | both | all
+interval: 5s
+grace: 2
+
+dev_ports:
+  - "3000-3010"     # Next.js, CRA, Rails, Express
+  - "4173"          # Vite preview
+  - "4200"          # Angular
+  - "4321"          # Astro
+  - "5173-5183"     # Vite
+  - "6006"          # Storybook
+  - "8000-8010"     # Django, python -m http.server
+  - "8080-8090"     # Tomcat, generic proxies
+  - "19000-19006"   # Expo
+
+# Never published, whatever the mode says. Add your database, debugger and
+# admin ports here before the first run — see SECURITY.md.
+exclude_ports:
+  - "9222"          # Chrome remote debugging: publishing it hands over the browser
+  - "5000"          # macOS ControlCenter
+  - "7000"          # macOS ControlCenter
+
+port_range:
+  - "3000-9999"     # only used by mode "all"
+
+agent_pattern: "claude|codex|cursor|windsurf|gemini|aider|opencode|goose|devin|copilot"
+
+notify:
+  telegram:
+    enabled: false
+    token_env: TELEGRAM_BOT_TOKEN   # keep the token out of this file
+    chat_id: ""
+  webhook:
+    enabled: false
+    url: ""
