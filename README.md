@@ -47,8 +47,18 @@ So the default policy (`mode: both`) publishes a port when **either** is true:
   ancestors: a background daemon that merely carries an agent's name in its path
   is not a dev server.
 
-Other modes: `dev` (allowlist only), `agent` (agent-spawned only), `all`
-(everything in `port_range` — noisy, read [SECURITY.md](SECURITY.md) first).
+The four modes, picked with `mode:` in the config or `-mode` on the command
+line:
+
+| Mode | Publishes | Good for |
+|---|---|---|
+| `both` | **the default** — a port that is either of the two below | a laptop you develop on |
+| `dev` | only the known dev-server ports | predictable: nothing new is published unless you list the port |
+| `agent` | only ports whose process descends from a coding agent | a machine where agents do the work and you want nothing else exposed |
+| `all` | every port in `port_range` | short-lived debugging; noisy, read [SECURITY.md](SECURITY.md) first |
+
+Nothing writes a config file for you: an install with no `-mode` runs as
+`both`.
 
 `exclude_ports` always wins, whatever the mode. The defaults exclude Chrome's
 remote-debugging port and a few others that would hand over more than a preview.
@@ -81,6 +91,17 @@ ts-autoserve service status      # installed? running? which file, which config?
 ts-autoserve service uninstall   # stop it and remove the service file
 ```
 
+Without `-mode`, the service runs the default policy, `both`. To settle that
+choice at install time:
+
+```bash
+ts-autoserve service install -mode agent   # publish only what an agent started
+```
+
+That writes `mode:` into the config file, so it stays visible and editable
+later without reinstalling. An existing config is never rewritten — if it
+already sets a different mode, the install says so and leaves it to you.
+
 It writes the service file pointing at the binary you ran, starts it, and keeps
 it running: **it comes back at login and restarts if it dies.** On a headless
 Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
@@ -92,6 +113,33 @@ does not inherit your shell's environment.
 
 The files under `packaging/` are the same definitions, for anyone who would
 rather install them by hand.
+
+### Let a coding agent install it
+
+The agent you already have open can do the whole thing. Paste this to it:
+
+```text
+Install ts-autoserve on this machine so the dev servers you start are reachable
+from my phone over Tailscale:
+
+1. go install github.com/breakzplatform/ts-autoserve/cmd/ts-autoserve@latest
+   and make sure the resulting binary is on PATH.
+2. Run `ts-autoserve -once -dry-run -v` and show me what it would publish.
+   If it fails because this user cannot change the serve config, stop and ask
+   me to run `sudo tailscale set --operator=$USER` -- that needs my password,
+   do not try it yourself.
+3. Run `ts-autoserve service install -mode agent`. That publishes only ports
+   opened by processes you started, and nothing else on my machine.
+4. Run `ts-autoserve service status` and tell me the URL pattern my ports will
+   appear at.
+
+Do not add a Telegram token or any other credential unless I give you one.
+```
+
+`-mode agent` is the right default here: when an agent runs the installer, the
+servers worth publishing are the ones it starts, and a port you opened yourself
+stays off the tailnet until you say otherwise. Switch to `both` later by
+editing `mode:` in the config if you want your own dev servers published too.
 
 ## Configure
 
@@ -154,6 +202,7 @@ it work before handing it to the OS.
 | Flag | Meaning |
 |---|---|
 | `-config PATH` | config file (default: first path that exists, see above) |
+| `-mode MODE` | `dev`, `agent`, `both` or `all`; overrides the config for this run, and on `service install` is written to the config |
 | `-once` | single pass, then exit |
 | `-dry-run` | report what would change, change nothing |
 | `-v` | debug logging |

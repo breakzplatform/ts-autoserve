@@ -223,6 +223,58 @@ func compile(cfg Config) (Config, error) {
 	return cfg, nil
 }
 
+// ParseMode turns a mode written on the command line into a Mode.
+func ParseMode(s string) (Mode, error) {
+	switch m := Mode(s); m {
+	case ModeDev, ModeAgent, ModeBoth, ModeAll:
+		return m, nil
+	default:
+		return "", fmt.Errorf("mode %q: want dev, agent, both or all", s)
+	}
+}
+
+// WriteMode records a mode in the config file at path, so a choice made once at
+// install time survives.
+//
+// It writes a new file and never rewrites an existing one: the config is the
+// user's, comments and all, and silently rewriting it is a worse surprise than
+// being told to edit one line. Setting the mode already in the file is fine.
+func WriteMode(path string, mode Mode) error {
+	if _, err := ParseMode(string(mode)); err != nil {
+		return err
+	}
+	switch existing, err := os.ReadFile(path); {
+	case err == nil:
+		var file Config
+		if err := yaml.Unmarshal(existing, &file); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if file.Mode == mode || (file.Mode == "" && mode == Default().Mode) {
+			return nil
+		}
+		if file.Mode == "" {
+			return fmt.Errorf("%s exists and sets no mode (so the default, %s, applies); add \"mode: %s\" to it", path, Default().Mode, mode)
+		}
+		return fmt.Errorf("%s already sets mode: %s; edit it to change that", path, file.Mode)
+	case !os.IsNotExist(err):
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	body := fmt.Sprintf(`# ts-autoserve configuration. Everything else has a default;
+# see the README for the full set of keys.
+#
+#   dev    only the well-known dev-server ports
+#   agent  only ports opened by a process a coding agent started
+#   both   either of the two (the default)
+#   all    every port in port_range -- noisy
+mode: %s
+`, mode)
+	return os.WriteFile(path, []byte(body), 0o600)
+}
+
 // Token resolves the Telegram token from the config or its environment variable.
 func (t Telegram) Resolve() string {
 	if t.Token != "" {

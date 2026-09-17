@@ -52,6 +52,7 @@ func main() {
 	fs.Usage = usage(fs)
 	var (
 		cfgPath = fs.String("config", config.DefaultPath(), "path to config.yaml")
+		mode    = fs.String("mode", "", "publish policy: dev, agent, both or all (default: both, or what the config says)")
 		once    = fs.Bool("once", false, "run a single pass and exit")
 		dryRun  = fs.Bool("dry-run", false, "report what would be published, change nothing")
 		verbose = fs.Bool("v", false, "debug logging")
@@ -69,9 +70,9 @@ func main() {
 	var err error
 	switch cmd {
 	case "":
-		err = run(*cfgPath, *once, *dryRun)
+		err = run(*cfgPath, *mode, *once, *dryRun)
 	case "service":
-		err = serviceCommand(sub, fs)
+		err = serviceCommand(sub, fs, *cfgPath, *mode)
 	case "version":
 		fmt.Println("ts-autoserve", version)
 	case "help":
@@ -94,6 +95,8 @@ func usage(fs *flag.FlagSet) func() {
 Usage:
   ts-autoserve [flags]              run the daemon
   ts-autoserve service install      install and start it as a user service
+                                    (-mode dev|agent|both|all writes the choice
+                                    to the config file; default is both)
   ts-autoserve service uninstall    stop the user service and remove it
   ts-autoserve service status       is the service installed and running?
   ts-autoserve version              print version
@@ -105,12 +108,12 @@ Flags:
 }
 
 // serviceCommand handles everything about running as an OS service.
-func serviceCommand(sub string, fs *flag.FlagSet) error {
+func serviceCommand(sub string, fs *flag.FlagSet, cfgPath, mode string) error {
 	switch sub {
 	case "install":
-		return manageService(true)
+		return manageService(true, cfgPath, mode)
 	case "uninstall":
-		return manageService(false)
+		return manageService(false, "", "")
 	case "status":
 		st, err := service.Status()
 		if err != nil {
@@ -138,7 +141,7 @@ func serviceCommand(sub string, fs *flag.FlagSet) error {
 
 // manageService installs or removes the OS service, so nobody has to copy a
 // plist or a unit file by hand.
-func manageService(install bool) error {
+func manageService(install bool, cfgPath, mode string) error {
 	if !install {
 		path, err := service.Uninstall()
 		if err != nil {
@@ -146,6 +149,19 @@ func manageService(install bool) error {
 		}
 		fmt.Println("removed", path)
 		return nil
+	}
+
+	// A mode chosen at install time goes in the config file rather than into
+	// the service definition, so it stays visible and editable afterwards
+	// without reinstalling anything.
+	if mode != "" {
+		m, err := config.ParseMode(mode)
+		if err != nil {
+			return err
+		}
+		if err := config.WriteMode(cfgPath, m); err != nil {
+			return err
+		}
 	}
 
 	bin, err := os.Executable()
@@ -180,10 +196,17 @@ func manageService(install bool) error {
 	return nil
 }
 
-func run(cfgPath string, once, dryRun bool) error {
+func run(cfgPath, mode string, once, dryRun bool) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
+	}
+	// -mode overrides the file for this run only; `service install -mode` is
+	// how a choice is made to stick.
+	if mode != "" {
+		if cfg.Mode, err = config.ParseMode(mode); err != nil {
+			return err
+		}
 	}
 
 	pub := tsserve.New()
