@@ -6,8 +6,9 @@ Start a dev server on your laptop and it becomes reachable from your phone at
 `https://<machine>.<tailnet>.ts.net:<port>/` — no command to run, no port to
 remember, no config per project. Stop the server and the mapping goes away.
 
-Built for developing from a phone: the URL arrives on Telegram (or any webhook)
-the moment the server is up.
+Built for developing from a phone: if you turn notifications on, the URL arrives
+on Telegram (or any webhook) the moment the server is up. Notifications are off
+by default — the daemon works fine without ever sending a message anywhere.
 
 ```
 $ npm run dev
@@ -97,6 +98,7 @@ port_range: ["3000-9999"]   # only used by mode "all"
 
 agent_pattern: "claude|codex|cursor|gemini|aider|opencode|goose"
 
+# Optional. With this block absent, nothing is ever sent anywhere.
 notify:
   telegram:
     enabled: true
