@@ -50,8 +50,12 @@ func (c *Client) URL(ctx context.Context, port int) (string, error) {
 }
 
 // Publish serves https://<node>:<port>/ as a proxy to 127.0.0.1:<port>.
-func (c *Client) Publish(ctx context.Context, port int) error {
-	return c.mutate(ctx, func(sc *ipn.ServeConfig, hp ipn.HostPort) {
+//
+// Every port goes in on one read-modify-write: a service that opens five ports
+// at once is one round trip to tailscaled and one node update on the tailnet,
+// not five, and nothing the user changes in between can be clobbered halfway.
+func (c *Client) Publish(ctx context.Context, ports []int) error {
+	return c.mutate(ctx, ports, func(sc *ipn.ServeConfig, hp ipn.HostPort, port int) {
 		if sc.TCP == nil {
 			sc.TCP = map[uint16]*ipn.TCPPortHandler{}
 		}
@@ -64,16 +68,17 @@ func (c *Client) Publish(ctx context.Context, port int) error {
 				"/": {Proxy: fmt.Sprintf("http://127.0.0.1:%d", port)},
 			},
 		}
-	}, port)
+	})
 }
 
-// Withdraw removes the mapping for a port, leaving the rest of the config alone.
-func (c *Client) Withdraw(ctx context.Context, port int) error {
-	return c.mutate(ctx, func(sc *ipn.ServeConfig, hp ipn.HostPort) {
+// Withdraw removes the mappings for these ports, leaving the rest of the
+// config alone.
+func (c *Client) Withdraw(ctx context.Context, ports []int) error {
+	return c.mutate(ctx, ports, func(sc *ipn.ServeConfig, hp ipn.HostPort, port int) {
 		delete(sc.TCP, uint16(port))
 		delete(sc.Web, hp)
 		delete(sc.AllowFunnel, hp)
-	}, port)
+	})
 }
 
 // Published reports the ports this node currently serves over HTTPS.
@@ -94,7 +99,10 @@ func (c *Client) Published(ctx context.Context) (map[int]bool, error) {
 	return out, nil
 }
 
-func (c *Client) mutate(ctx context.Context, fn func(*ipn.ServeConfig, ipn.HostPort), port int) error {
+func (c *Client) mutate(ctx context.Context, ports []int, fn func(*ipn.ServeConfig, ipn.HostPort, int)) error {
+	if len(ports) == 0 {
+		return nil
+	}
 	host, err := c.DNSName(ctx)
 	if err != nil {
 		return err
@@ -106,7 +114,20 @@ func (c *Client) mutate(ctx context.Context, fn func(*ipn.ServeConfig, ipn.HostP
 	if sc == nil {
 		sc = &ipn.ServeConfig{}
 	}
-	fn(sc, ipn.HostPort(fmt.Sprintf("%s:%d", host, port)))
+	for _, port := range ports {
+		fn(sc, ipn.HostPort(fmt.Sprintf("%s:%d", host, port)), port)
+	}
+	// Hand back nil rather than an empty map, so withdrawing the last port
+	// leaves the serve config as clean as it was before the daemon ran.
+	if len(sc.TCP) == 0 {
+		sc.TCP = nil
+	}
+	if len(sc.Web) == 0 {
+		sc.Web = nil
+	}
+	if len(sc.AllowFunnel) == 0 {
+		sc.AllowFunnel = nil
+	}
 	if err := c.lc.SetServeConfig(ctx, sc); err != nil {
 		return fmt.Errorf("set serve config: %w", err)
 	}

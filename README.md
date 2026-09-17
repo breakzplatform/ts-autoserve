@@ -155,7 +155,10 @@ it work before handing it to the OS.
 ## What it will not do
 
 - **Touch mappings it did not create.** A `tailscale serve` you set up by hand
-  for a port that is still listening is left alone.
+  is left alone for as long as its port is still listening: the daemon neither
+  publishes over it nor withdraws it when the server stops. The serve config
+  records no author, so anything already mapped to a live port is treated as
+  yours, including a mapping made while the daemon is running.
 - **Expose anything publicly.** It only uses Serve (tailnet-only), never Funnel.
 - **Outlive itself.** On shutdown it withdraws what it published; on startup it
   clears mappings left behind by a previous run whose ports are gone.
