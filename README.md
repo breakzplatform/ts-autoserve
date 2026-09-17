@@ -114,9 +114,10 @@ does not inherit your shell's environment.
 The files under `packaging/` are the same definitions, for anyone who would
 rather install them by hand.
 
-### Let a coding agent install it
+<details>
+<summary><b>Let a coding agent install it</b> — a prompt to paste, which installs in <code>agent</code> mode</summary>
 
-The agent you already have open can do the whole thing. Paste this to it:
+The agent you already have open can do the whole thing:
 
 ```text
 Install ts-autoserve on this machine so the dev servers you start are reachable
@@ -140,6 +141,8 @@ Do not add a Telegram token or any other credential unless I give you one.
 servers worth publishing are the ones it starts, and a port you opened yourself
 stays off the tailnet until you say otherwise. Switch to `both` later by
 editing `mode:` in the config if you want your own dev servers published too.
+
+</details>
 
 ## Configure
 
