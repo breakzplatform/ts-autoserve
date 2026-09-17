@@ -94,5 +94,5 @@ readable only by you (`chmod 600`).
 
 ## Reporting a vulnerability
 
-Open a private security advisory on the repository, or email the maintainer.
+Open a private security advisory on the repository, or email dev@joseli.to.
 Please do not open a public issue for a vulnerability.
