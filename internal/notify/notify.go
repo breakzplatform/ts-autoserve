@@ -62,8 +62,9 @@ func All(ctx context.Context, ns []Notifier, ev Event) {
 var client = &http.Client{Timeout: 10 * time.Second}
 
 type telegram struct {
-	token  string
-	chatID string
+	token    string
+	chatID   string
+	endpoint string // overridden in tests; empty means the Bot API
 }
 
 func (t *telegram) Notify(ctx context.Context, ev Event) error {
@@ -75,7 +76,10 @@ func (t *telegram) Notify(ctx context.Context, ev Event) error {
 	if ev.Kind != "up" {
 		form.Set("disable_notification", "true")
 	}
-	endpoint := "https://api.telegram.org/bot" + t.token + "/sendMessage"
+	endpoint := t.endpoint
+	if endpoint == "" {
+		endpoint = "https://api.telegram.org/bot" + t.token + "/sendMessage"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err

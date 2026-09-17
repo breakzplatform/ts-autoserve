@@ -108,10 +108,45 @@ func Default() Config {
 	}
 }
 
-// DefaultPath is where the config lives unless another path is given.
-func DefaultPath() string {
+// SearchPaths lists where the config is looked for, in order.
+//
+// ~/.config works on every platform, including macOS, because that is where
+// people who use several machines keep their dotfiles. The platform's own
+// config directory still wins on macOS if a file is actually there.
+func SearchPaths() []string {
+	var paths []string
+	seen := map[string]bool{}
+	add := func(dir string) {
+		if dir == "" {
+			return
+		}
+		p := filepath.Join(dir, "ts-autoserve", "config.yaml")
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	add(os.Getenv("XDG_CONFIG_HOME"))
+	if home, err := os.UserHomeDir(); err == nil {
+		add(filepath.Join(home, ".config"))
+	}
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "ts-autoserve", "config.yaml")
+		add(dir)
+	}
+	return paths
+}
+
+// DefaultPath is the config file to read when none was given: the first one
+// that exists, or the first candidate so error messages name a sensible path.
+func DefaultPath() string {
+	paths := SearchPaths()
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if len(paths) > 0 {
+		return paths[0]
 	}
 	return "config.yaml"
 }

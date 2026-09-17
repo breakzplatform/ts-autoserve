@@ -72,20 +72,35 @@ Check what it would do, without changing anything:
 ts-autoserve -once -dry-run
 ```
 
-Then run it in the foreground, or install it as a service:
+Then install it as a service — one command, no file to copy:
 
-- **macOS**: copy `packaging/launchd/com.breakzplatform.ts-autoserve.plist` to
-  `~/Library/LaunchAgents/`, edit the paths, then
-  `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.breakzplatform.ts-autoserve.plist`
-- **Linux**: copy `packaging/systemd/ts-autoserve.service` to
-  `~/.config/systemd/user/`, then
-  `systemctl --user enable --now ts-autoserve`
+```bash
+ts-autoserve -install     # launchd on macOS, systemd --user on Linux
+ts-autoserve -uninstall   # stop it and remove the service file
+```
+
+It writes the service file pointing at the binary you ran, starts it, and keeps
+it running: **it comes back at login and restarts if it dies.** On a headless
+Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
+user service starts at boot.
+
+If a notification token is configured through `token_env`, `-install` copies its
+current value into the service definition, which is written mode 600 — a service
+does not inherit your shell's environment.
+
+The files under `packaging/` are the same definitions, for anyone who would
+rather install them by hand.
 
 ## Configure
 
-Everything has a default; the file is optional. It lives at
-`~/.config/ts-autoserve/config.yaml` (`~/Library/Application Support/ts-autoserve/config.yaml`
-on macOS), or wherever `-config` points.
+Everything has a default; the file is optional. It is looked for in this order,
+on every platform including macOS:
+
+1. `$XDG_CONFIG_HOME/ts-autoserve/config.yaml`
+2. `~/.config/ts-autoserve/config.yaml`
+3. the platform config dir (`~/Library/Application Support/ts-autoserve/config.yaml` on macOS)
+
+or wherever `-config` points.
 
 ```yaml
 mode: both          # dev | agent | both | all
@@ -124,6 +139,8 @@ The webhook receives one JSON object per event:
 | `-dry-run` | report what would change, change nothing |
 | `-v` | debug logging |
 | `-version` | print version |
+| `-install` | install and start the user service |
+| `-uninstall` | stop and remove the user service |
 
 ## What it will not do
 
