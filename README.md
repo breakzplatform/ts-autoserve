@@ -40,7 +40,8 @@ So the default policy (`mode: both`) publishes a port when **either** is true:
 - **It is a known dev-server port** — 3000-3010, 5173-5183, 4200, 4321,
   8000-8010, 8080-8090, 6006, 8888, 19000-19006 and friends.
 - **Its process descends from a coding agent** — Claude Code, Codex, Cursor,
-  Gemini CLI, aider, opencode, goose and anything else you add to the pattern.
+  Antigravity (`agy`), aider, opencode, goose and anything else you add to the
+  pattern.
   The test is process ancestry, so `npm run dev` started inside an agent counts,
   whatever port it picked. The listening process itself is not matched, only its
   ancestors: a background daemon that merely carries an agent's name in its path
@@ -112,7 +113,7 @@ dev_ports: ["3000-3010", "5173-5183", "8080-8090"]
 exclude_ports: ["9222", "5000"]
 port_range: ["3000-9999"]   # only used by mode "all"
 
-agent_pattern: "claude|codex|cursor|gemini|aider|opencode|goose"
+agent_pattern: "claude|codex|cursor|antigravity|\\bagy\\b|aider|opencode"
 
 # Optional. With this block absent, nothing is ever sent anywhere.
 notify:

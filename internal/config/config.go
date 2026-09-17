@@ -103,8 +103,9 @@ func Default() Config {
 			"8384", // Syncthing UI
 			"22000",
 		},
-		PortRange:    []string{"3000-9999"},
-		AgentPattern: `claude|codex|cursor|windsurf|gemini|aider|opencode|goose|devin|copilot`,
+		PortRange: []string{"3000-9999"},
+		// \b around short names: "agy" would otherwise match "strategy".
+		AgentPattern: `claude|codex|cursor|windsurf|antigravity|\bagy\b|aider|opencode|goose|devin|copilot`,
 	}
 }
 

@@ -24,7 +24,8 @@ exclude_ports:
 port_range:
   - "3000-9999"     # only used by mode "all"
 
-agent_pattern: "claude|codex|cursor|windsurf|gemini|aider|opencode|goose|devin|copilot"
+# Short names need word boundaries: bare "agy" would match "strategy".
+agent_pattern: "claude|codex|cursor|windsurf|antigravity|\\bagy\\b|aider|opencode|goose|devin|copilot"
 
 notify:
   telegram:
