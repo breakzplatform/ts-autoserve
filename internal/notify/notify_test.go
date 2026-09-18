@@ -90,20 +90,20 @@ func TestWebhookPostsJSON(t *testing.T) {
 	if err := w.Notify(context.Background(), ev); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	if got != ev {
+	if got.Kind != ev.Kind || got.Port != ev.Port || got.URL != ev.URL || got.Proc != ev.Proc || got.Text != ev.Text {
 		t.Errorf("webhook got %+v, want %+v", got, ev)
 	}
 }
 
 func TestFromConfigIsEmptyWhenNothingEnabled(t *testing.T) {
-	if ns := FromConfig(config.Notify{}); len(ns) != 0 {
+	if ns, _ := FromConfig(config.Notify{}); len(ns) != 0 {
 		t.Errorf("FromConfig returned %d notifiers for an empty config", len(ns))
 	}
 }
 
 func TestFromConfigSkipsIncompleteTelegram(t *testing.T) {
 	cfg := config.Notify{Telegram: config.Telegram{Enabled: true, Token: "x"}} // no chat_id
-	if ns := FromConfig(cfg); len(ns) != 0 {
+	if ns, _ := FromConfig(cfg); len(ns) != 0 {
 		t.Errorf("FromConfig accepted a telegram config with no chat_id")
 	}
 }

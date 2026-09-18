@@ -109,7 +109,10 @@ user service starts at boot.
 
 If a notification token is configured through `token_env`, `service install` copies its
 current value into the service definition, which is written mode 600 — a service
-does not inherit your shell's environment.
+does not inherit your shell's environment. If you already keep your tokens in a
+`KEY=value` file, point `env_file:` at it instead: the daemon reads the file at
+startup and nothing is copied, so rotating a token means editing one file and
+restarting the service.
 
 The files under `packaging/` are the same definitions, for anyone who would
 rather install them by hand.
@@ -172,6 +175,11 @@ port_range: ["3000-9999"]   # only used by mode "all"
 
 agent_pattern: "claude|codex|cursor|antigravity|\\bagy\\b|aider|opencode"
 
+# Optional. KEY=value lines read into the environment at startup, so token_env
+# can name a variable kept in a file you already have. Variables set in the
+# real environment win. Values may be quoted; $VAR is expanded.
+env_file: ~/.secrets/env
+
 # Optional. With this block absent, nothing is ever sent anywhere.
 notify:
   telegram:
@@ -187,6 +195,38 @@ The webhook receives one JSON object per event:
 
 ```json
 {"kind":"up","port":5173,"url":"https://laptop.example-tailnet.ts.net:5173/","proc":"node","source":"host","text":"node up on port 5173\nhttps://..."}
+```
+
+### Changing the messages
+
+Each kind of event has a [Go template](https://pkg.go.dev/text/template) for
+its text, which is what Telegram shows and what the webhook sends as `text`.
+Set any of them to replace the built-in one; set one to `""` to stop sending
+that kind of event altogether.
+
+```yaml
+notify:
+  messages:
+    up: "🟢 {{.Label}} → {{.URL}}"         # built-in: "{{.Label}} up on port {{.Port}}\n{{.URL}}"
+    down: ""                                # muted
+    start: "back up, serving {{join .Ports}}"
+```
+
+A template sees `.Kind` (`up`, `down`, `start`), `.Port`, `.URL`, `.Proc`,
+`.Source`, `.Ports` (on `start`, every port already served) and `.Label` (the
+process name, or "a local server"). `join` lists ports as `3000, 5173`.
+
+When the receiving end expects a different JSON shape than the one above,
+`webhook.body` replaces the whole body. The same fields are available, plus
+`.Text`, and `json` quotes a value safely:
+
+```yaml
+notify:
+  webhook:
+    enabled: true
+    url: https://discord.com/api/webhooks/...
+    body: '{"content": {{json .Text}}}'
+    content_type: application/json   # the default
 ```
 
 ## Commands and flags

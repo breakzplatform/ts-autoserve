@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/breakzplatform/ts-autoserve/internal/agent"
@@ -37,6 +36,7 @@ type Daemon struct {
 	Sources   []discover.Source
 	Pub       Publisher
 	Notifiers []notify.Notifier
+	Messages  *notify.Messages // nil: the built-in text
 	Store     Store
 	DryRun    bool
 
@@ -182,9 +182,7 @@ func (d *Daemon) Poll(ctx context.Context) error {
 	if !d.started {
 		d.started = true
 		if len(fresh) > 0 {
-			notify.All(ctx, d.Notifiers, notify.Event{
-				Kind: "start", Text: "ts-autoserve is up; already serving " + join(fresh),
-			})
+			d.notify(ctx, notify.Event{Kind: "start", Ports: fresh})
 		}
 	}
 	return nil
@@ -250,9 +248,8 @@ func (d *Daemon) publishNew(ctx context.Context, live map[int]discover.Listener)
 		// The first pass adopts whatever was already running; announcing each
 		// one separately would mean a burst of messages on every restart.
 		if d.started {
-			notify.All(ctx, d.Notifiers, notify.Event{
+			d.notify(ctx, notify.Event{
 				Kind: "up", Port: port, URL: url, Proc: l.Proc, Source: l.Source,
-				Text: fmt.Sprintf("%s up on port %d\n%s", label(l.Proc), port, url),
 			})
 		}
 	}
@@ -285,9 +282,8 @@ func (d *Daemon) withdrawGone(ctx context.Context, live map[int]discover.Listene
 		e := d.owned[port]
 		delete(d.owned, port)
 		slog.Info("withdrew", "port", port)
-		notify.All(ctx, d.Notifiers, notify.Event{
+		d.notify(ctx, notify.Event{
 			Kind: "down", Port: port, Proc: e.proc, Source: e.source,
-			Text: fmt.Sprintf("port %d is gone", port),
 		})
 	}
 	return len(expired)
@@ -381,17 +377,10 @@ func (d *Daemon) agentSpawned(l discover.Listener) bool {
 	return d.detector.Spawned(l.PID)
 }
 
-func label(proc string) string {
-	if proc == "" {
-		return "a local server"
+// notify renders an event's text and sends it, unless the config muted it.
+func (d *Daemon) notify(ctx context.Context, ev notify.Event) {
+	if len(d.Notifiers) == 0 || !d.Messages.Render(&ev) {
+		return
 	}
-	return proc
-}
-
-func join(ports []int) string {
-	parts := make([]string, len(ports))
-	for i, p := range ports {
-		parts[i] = fmt.Sprint(p)
-	}
-	return strings.Join(parts, ", ")
+	notify.All(ctx, d.Notifiers, ev)
 }

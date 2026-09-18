@@ -27,6 +27,9 @@ port_range:
 # Short names need word boundaries: bare "agy" would match "strategy".
 agent_pattern: "claude|codex|cursor|windsurf|antigravity|\\bagy\\b|aider|opencode|goose|devin|copilot"
 
+# KEY=value file read into the environment at startup (tokens you already keep).
+# env_file: ~/.secrets/env
+
 notify:
   telegram:
     enabled: false
@@ -35,3 +38,9 @@ notify:
   webhook:
     enabled: false
     url: ""
+    # body: '{"content": {{json .Text}}}'   # replaces the JSON body; see README
+  # Go templates for each event's text; "" mutes that kind. See README.
+  # messages:
+  #   up: "{{.Label}} up on port {{.Port}}\n{{.URL}}"
+  #   down: "port {{.Port}} is gone"
+  #   start: "ts-autoserve is up; already serving {{join .Ports}}"

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -26,8 +27,46 @@ import (
 	"github.com/breakzplatform/ts-autoserve/internal/tsserve"
 )
 
-// version is set at build time: -ldflags "-X main.version=v0.1.0".
+// version is set at build time: -ldflags "-X main.version=v0.1.0". When it is
+// not, buildVersion asks the Go toolchain what it recorded instead.
 var version = "dev"
+
+// buildVersion names the build without needing -ldflags. "go install ...@v0.1.0"
+// records the module version; a build from a checkout records the commit, so
+// a plain "go install ./cmd/ts-autoserve" reports dev+<commit> rather than dev.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return version
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var rev string
+	var dirty bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return version
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	v := version + "+" + rev
+	if dirty {
+		v += "-dirty"
+	}
+	return v
+}
 
 func main() {
 	// Commands come first, flags after. Everything about the OS service is
@@ -74,7 +113,7 @@ func main() {
 	case "service":
 		err = serviceCommand(sub, fs, *cfgPath, *mode)
 	case "version":
-		fmt.Println("ts-autoserve", version)
+		fmt.Println("ts-autoserve", buildVersion())
 	case "help":
 		fs.Usage()
 	default:
@@ -173,9 +212,11 @@ func manageService(install bool, cfgPath, mode string) error {
 	}
 
 	// Carry the Telegram token through, if the config asks for one and it is
-	// set here: a service does not inherit the shell's environment.
+	// set here: a service does not inherit the shell's environment. With an
+	// env_file the daemon reads the token itself, so no copy goes in the
+	// service definition to fall out of date.
 	env := map[string]string{}
-	if cfg, err := config.Load(config.DefaultPath()); err == nil {
+	if cfg, err := config.Load(config.DefaultPath()); err == nil && cfg.EnvFile == "" {
 		if name := cfg.Notify.Telegram.TokenEnv; name != "" {
 			if v := os.Getenv(name); v != "" {
 				env[name] = v
@@ -209,6 +250,19 @@ func run(cfgPath, mode string, once, dryRun bool) error {
 		}
 	}
 
+	// Before anything reads a token: the env file is where it may live.
+	if err := config.ApplyEnvFile(cfg.EnvFile); err != nil {
+		return err
+	}
+	notifiers, err := notify.FromConfig(cfg.Notify)
+	if err != nil {
+		return err
+	}
+	messages, err := notify.ParseMessages(cfg.Notify.Messages)
+	if err != nil {
+		return err
+	}
+
 	pub := tsserve.New()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -218,12 +272,13 @@ func run(cfgPath, mode string, once, dryRun bool) error {
 		return fmt.Errorf("%w (is tailscaled running, and does this user have serve permission? see README)", err)
 	}
 
-	d := daemon.New(cfg, []discover.Source{discover.Host{}}, pub, notify.FromConfig(cfg.Notify))
+	d := daemon.New(cfg, []discover.Source{discover.Host{}}, pub, notifiers)
+	d.Messages = messages
 	d.DryRun = dryRun
 	d.Store = state.New(state.DefaultPath())
 
 	slog.Info("ts-autoserve starting",
-		"version", version, "node", host, "mode", cfg.Mode,
+		"version", buildVersion(), "node", host, "mode", cfg.Mode,
 		"interval", cfg.Interval, "grace", cfg.Grace, "dry_run", dryRun,
 		"state", state.DefaultPath())
 

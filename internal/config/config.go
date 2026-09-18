@@ -37,6 +37,7 @@ type Config struct {
 	ExcludePorts []string      `yaml:"exclude_ports"` // never published, whatever the mode says
 	PortRange    []string      `yaml:"port_range"`    // bounds for mode "all"
 	AgentPattern string        `yaml:"agent_pattern"` // process names that count as coding agents
+	EnvFile      string        `yaml:"env_file"`      // KEY=value file read into the environment at startup
 	Notify       Notify        `yaml:"notify"`
 
 	Dev     portset.Set    `yaml:"-"`
@@ -49,6 +50,15 @@ type Config struct {
 type Notify struct {
 	Telegram Telegram `yaml:"telegram"`
 	Webhook  Webhook  `yaml:"webhook"`
+	Messages Messages `yaml:"messages"`
+}
+
+// Messages overrides the text sent for each kind of event, as Go templates.
+// A nil field keeps the built-in text; an empty one mutes that kind of event.
+type Messages struct {
+	Up    *string `yaml:"up"`
+	Down  *string `yaml:"down"`
+	Start *string `yaml:"start"`
 }
 
 // Telegram posts to the Bot API. Token may come from TokenEnv instead of disk.
@@ -59,10 +69,13 @@ type Telegram struct {
 	ChatID   string `yaml:"chat_id"`
 }
 
-// Webhook posts a small JSON body to any URL.
+// Webhook posts a small JSON body to any URL. Body replaces that JSON with a
+// template of its own, for services that expect a different shape.
 type Webhook struct {
-	Enabled bool   `yaml:"enabled"`
-	URL     string `yaml:"url"`
+	Enabled     bool   `yaml:"enabled"`
+	URL         string `yaml:"url"`
+	Body        string `yaml:"body"`
+	ContentType string `yaml:"content_type"`
 }
 
 // Default is the configuration used when no file exists.
@@ -192,6 +205,7 @@ func merge(base, file Config) Config {
 	if file.AgentPattern != "" {
 		base.AgentPattern = file.AgentPattern
 	}
+	base.EnvFile = file.EnvFile
 	base.Notify = file.Notify
 	return base
 }

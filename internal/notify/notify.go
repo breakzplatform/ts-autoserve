@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/breakzplatform/ts-autoserve/internal/config"
@@ -28,7 +29,16 @@ type Event struct {
 	URL    string `json:"url,omitempty"`
 	Proc   string `json:"proc,omitempty"`
 	Source string `json:"source,omitempty"`
+	Ports  []int  `json:"ports,omitempty"` // "start": everything already served
 	Text   string `json:"text"`
+}
+
+// Label names the process behind an event, for message templates.
+func (e Event) Label() string {
+	if e.Proc == "" {
+		return "a local server"
+	}
+	return e.Proc
 }
 
 // Notifier delivers events. A failure to notify never stops the daemon.
@@ -37,7 +47,7 @@ type Notifier interface {
 }
 
 // FromConfig builds the notifiers named in the config.
-func FromConfig(cfg config.Notify) []Notifier {
+func FromConfig(cfg config.Notify) ([]Notifier, error) {
 	var out []Notifier
 	if cfg.Telegram.Enabled {
 		if token := cfg.Telegram.Resolve(); token != "" && cfg.Telegram.ChatID != "" {
@@ -47,9 +57,17 @@ func FromConfig(cfg config.Notify) []Notifier {
 		}
 	}
 	if cfg.Webhook.Enabled && cfg.Webhook.URL != "" {
-		out = append(out, &webhook{url: cfg.Webhook.URL})
+		w := &webhook{url: cfg.Webhook.URL, contentType: cfg.Webhook.ContentType}
+		if cfg.Webhook.Body != "" {
+			t, err := template.New("body").Funcs(funcs).Parse(cfg.Webhook.Body)
+			if err != nil {
+				return nil, fmt.Errorf("notify.webhook.body: %w", err)
+			}
+			w.body = t
+		}
+		out = append(out, w)
 	}
-	return out
+	return out, nil
 }
 
 // All fans an event out, logging rather than propagating failures.
@@ -120,18 +138,35 @@ func sendErr(what string, err error) error {
 	return fmt.Errorf("%s request failed", what)
 }
 
-type webhook struct{ url string }
+type webhook struct {
+	url         string
+	body        *template.Template // nil: the event itself, as JSON
+	contentType string             // empty: application/json
+}
 
 func (w *webhook) Notify(ctx context.Context, ev Event) error {
-	body, err := json.Marshal(ev)
-	if err != nil {
-		return err
+	var body []byte
+	if w.body != nil {
+		var buf bytes.Buffer
+		if err := w.body.Execute(&buf, ev); err != nil {
+			return fmt.Errorf("webhook body: %w", err)
+		}
+		body = buf.Bytes()
+	} else {
+		var err error
+		if body, err = json.Marshal(ev); err != nil {
+			return err
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	ct := w.contentType
+	if ct == "" {
+		ct = "application/json"
+	}
+	req.Header.Set("Content-Type", ct)
 	resp, err := client.Do(req)
 	if err != nil {
 		return sendErr("webhook", err)
