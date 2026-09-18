@@ -2,13 +2,13 @@
 
 Publish local dev servers on your tailnet, automatically.
 
-Start a dev server on your laptop and it becomes reachable from your phone at
-`https://<machine>.<tailnet>.ts.net:<port>/` — no command to run, no port to
-remember, no config per project. Stop the server and the mapping goes away.
+Start a dev server on your laptop and your phone can open it at
+`https://<machine>.<tailnet>.ts.net:<port>/`. You don't run a command, remember
+a port, or configure each project. Stop the server and the mapping goes away.
 
-Built for developing from a phone: if you turn notifications on, the URL arrives
-on Telegram (or any webhook) the moment the server is up. Notifications are off
-by default — the daemon works fine without ever sending a message anywhere.
+It's meant for developing from a phone. If you turn notifications on, the URL
+arrives on Telegram (or any webhook) as soon as the server is up. Notifications
+are off by default, and the daemon works fine without ever sending a message.
 
 ```
 $ npm run dev
@@ -23,39 +23,40 @@ $ npm run dev
 
 A small daemon polls the machine's listening TCP sockets (`lsof` on macOS,
 `ss` on Linux). When a port it cares about appears, it writes a `tailscale serve`
-mapping through tailscaled's local API; when the port goes away, it removes it.
+mapping through tailscaled's local API. When the port goes away, it removes the
+mapping.
 
 Tailscale handles TLS and identity. Only devices in your tailnet can reach the
 published ports, and only if your tailnet policy lets them.
 
 ### Which ports get published
 
-Publishing *everything* that listens is a bad idea — a laptop is full of local
+Publishing everything that listens is a bad idea. A laptop runs plenty of local
 infrastructure (editor bridges, sync daemons, debug ports) that has no business
-on the network. Filtering by "does it answer HTTP?" does not help either: those
-daemons answer HTTP too.
+on the network. Checking whether a port answers HTTP doesn't help either,
+because those daemons answer HTTP too.
 
 So a port is judged by two tests:
 
-- **Is it a known dev-server port?** — 3000-3010, 5173-5183, 4200, 4321,
-  8000-8010, 8080-8090, 6006, 8888, 19000-19006 and friends.
-- **Does its process descend from a coding agent?** — Claude Code, Codex, Cursor,
-  Antigravity (`agy`), aider, opencode, goose and anything else you add to the
-  pattern.
-  The test is process ancestry, so `npm run dev` started inside an agent counts,
-  whatever port it picked. The listening process itself is not matched, only its
-  ancestors: a background daemon that merely carries an agent's name in its path
-  is not a dev server.
+- **Is it a known dev-server port?** Covers 3000-3010, 5173-5183, 4200, 4321,
+  8000-8010, 8080-8090, 6006, 8888, 19000-19006 and a few more.
+- **Does its process descend from a coding agent?** Matches Claude Code,
+  Codex, Cursor, Windsurf, Antigravity (`agy`), aider, opencode, goose, Devin,
+  Copilot, Grok and anything else you add to the pattern.
+  The test looks at process ancestry, so `npm run dev` started inside an agent
+  counts on any port. Only the ancestors are matched, not the listening process
+  itself, so a background daemon that happens to have an agent's name in its
+  path doesn't count as a dev server.
 
-The mode decides how they combine. Pick it with `mode:` in the config or
+The mode decides how the two tests combine. Set it with `mode:` in the config or
 `-mode` on the command line:
 
 | Mode | Publishes | Good for |
 |---|---|---|
-| `both` | **the default** — a port that passes either test | a laptop you develop on |
-| `dev` | only the known dev-server ports | predictable: nothing new is published unless you list the port |
+| `both` | a port that passes either test (the default) | a laptop you develop on |
+| `dev` | only the known dev-server ports | predictability: nothing new is published unless you list the port |
 | `agent` | only ports whose process descends from a coding agent | a machine where agents do the work and you want nothing else exposed |
-| `all` | every port in `port_range` | short-lived debugging; noisy, read [SECURITY.md](SECURITY.md) first |
+| `all` | every port in `port_range` | short debugging sessions; noisy, so read [SECURITY.md](SECURITY.md) first |
 
 `exclude_ports` always wins, whatever the mode. The defaults exclude Chrome's
 remote-debugging port and a few others that would hand over more than a preview.
@@ -74,13 +75,13 @@ Grant your user permission to change the serve config (once per machine):
 sudo tailscale set --operator=$USER
 ```
 
-Check what it would do, without changing anything:
+See what it would do without changing anything:
 
 ```bash
 ts-autoserve -once -dry-run
 ```
 
-Then install it as a service — one command, no file to copy:
+Then install it as a service (single command, no files to copy):
 
 ```bash
 ts-autoserve service install     # launchd on macOS, systemd --user on Linux
@@ -93,20 +94,21 @@ To pick a mode other than `both` at install time:
 ts-autoserve service install -mode agent   # publish only what an agent started
 ```
 
-That writes `mode:` into the config file, so it stays visible and editable
-later without reinstalling. An existing config is never rewritten — if it
-already sets a different mode, the install says so and leaves it to you.
+That writes `mode:` into the config file, where you can see it and change it
+later without reinstalling. The installer never rewrites an existing config. If
+yours already sets a different mode, the installer tells you and leaves the
+choice to you.
 
-It writes the service file pointing at the binary you ran, starts it, and keeps
-it running: **it comes back at login and restarts if it dies.** On a headless
-Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
-user service starts at boot.
+The installer writes a service file that points at the binary you ran, starts
+the service, and keeps it running. It comes back at login and restarts if it
+dies. On a headless Linux box that nobody logs into, add
+`sudo loginctl enable-linger $USER` so the user service starts at boot.
 
-The files under `packaging/` are the same definitions, for anyone who would
-rather install them by hand.
+The files under `packaging/` are the same definitions, if you'd rather install
+them by hand.
 
 <details>
-<summary><b>Let a coding agent install it</b> — a prompt to paste, which installs in <code>agent</code> mode</summary>
+<summary><b>Let a coding agent install it</b> (a prompt to paste; it installs in <code>agent</code> mode)</summary>
 
 The agent you already have open can do the whole thing:
 
@@ -128,16 +130,16 @@ from my phone over Tailscale:
 Do not add a Telegram token or any other credential unless I give you one.
 ```
 
-`-mode agent` is the right default here: when an agent runs the installer, the
-servers worth publishing are the ones it starts, and a port you opened yourself
-stays off the tailnet until you say otherwise. Switch to `both` later by
-editing `mode:` in the config if you want your own dev servers published too.
+`-mode agent` makes sense here. When an agent runs the installer, the servers
+worth publishing are the ones it starts, and a port you opened yourself stays
+off the tailnet until you say otherwise. If you want your own dev servers
+published too, change `mode:` in the config to `both`.
 
 </details>
 
 ## Configure
 
-Everything has a default; the file is optional.
+Everything has a default, so the file is optional.
 
 ```yaml
 mode: both          # dev | agent | both | all
@@ -148,7 +150,7 @@ dev_ports: ["3000-3010", "5173-5183", "8080-8090"]
 exclude_ports: ["9222", "5000"]
 port_range: ["3000-9999"]   # only used by mode "all"
 
-agent_pattern: "claude|codex|cursor|antigravity|\\bagy\\b|aider|opencode"
+agent_pattern: "claude|codex|cursor|windsurf|antigravity|\\bagy\\b|aider|opencode|goose|devin|copilot|\\bgrok\\b"
 
 # Optional. KEY=value lines read into the environment at startup, so token_env
 # can name a variable kept in a file you already have. Variables set in the
@@ -166,18 +168,18 @@ notify:
     url: https://example.com/hook
 ```
 
-The file is looked for in this order:
+The daemon looks for the file in this order:
 
 1. `$XDG_CONFIG_HOME/ts-autoserve/config.yaml`
 2. `~/.config/ts-autoserve/config.yaml`
 3. the platform config dir (`~/Library/Application Support/ts-autoserve/config.yaml` on macOS)
 
-or wherever `-config` points.
+`-config` overrides the search.
 
 The daemon also keeps a state file at `$XDG_STATE_HOME/ts-autoserve/state.json`
-(or `~/.local/state/ts-autoserve/state.json`), recording which mappings are its
-own. It is not meant to be edited; delete it and the daemon forgets what was
-its, and cleans up nothing it finds.
+(or `~/.local/state/ts-autoserve/state.json`) that records which mappings it
+created. Don't edit it. If you delete it, the daemon forgets which mappings were
+its own and won't clean up any of them.
 
 The webhook receives one JSON object per event:
 
@@ -187,21 +189,22 @@ The webhook receives one JSON object per event:
 
 ### Tokens and the service
 
-A service does not inherit your shell's environment, so a token named by
+A service doesn't inherit your shell's environment, so a token named by
 `token_env` has to reach it another way:
 
-- **Copied at install.** Export the variable before running `service install`;
-  its current value is written into the service definition, which is mode 600.
-- **Read from a file.** Point `env_file:` at a `KEY=value` file you already
-  keep. The daemon reads it at startup and nothing is copied, so rotating a
-  token means editing that file and restarting the service.
+- **Copied at install:** export the variable before running `service install`.
+  The installer copies its current value into the service definition, which is
+  mode 600.
+- **Read from a file:** point `env_file:` at a `KEY=value` file you already keep.
+  The daemon reads it at startup and nothing is copied, so rotating a token means
+  editing that file and restarting the service.
 
 ### Changing the messages
 
 Each kind of event has a [Go template](https://pkg.go.dev/text/template) for
-its text, which is what Telegram shows and what the webhook sends as `text`.
-Set any of them to replace the built-in one; set one to `""` to stop sending
-that kind of event altogether.
+its text. That text is what Telegram shows and what the webhook sends as `text`.
+Set a template to replace the built-in one, or set it to `""` to stop sending
+that kind of event.
 
 ```yaml
 notify:
@@ -215,9 +218,9 @@ A template sees `.Kind` (`up`, `down`, `start`), `.Port`, `.URL`, `.Proc`,
 `.Source`, `.Ports` (on `start`, every port already served) and `.Label` (the
 process name, or "a local server"). `join` lists ports as `3000, 5173`.
 
-When the receiving end expects a different JSON shape than the one above,
-`webhook.body` replaces the whole body. The same fields are available, plus
-`.Text`, and `json` quotes a value safely:
+If the receiving end expects a different JSON shape, `webhook.body` replaces the
+whole body. It sees the same fields plus `.Text`, and `json` quotes a value
+safely:
 
 ```yaml
 notify:
@@ -238,8 +241,8 @@ ts-autoserve service status       is the service installed and running?
 ts-autoserve version              print version
 ```
 
-Running it with no command runs the daemon in the foreground — useful to watch
-it work before handing it to the OS.
+With no command, it runs the daemon in the foreground, which is handy for
+watching it work before you hand it to the OS.
 
 | Flag | Meaning |
 |---|---|
@@ -251,31 +254,30 @@ it work before handing it to the OS.
 
 ## What it will not do
 
-- **Touch mappings it did not create.** A `tailscale serve` you set up by hand
-  is left alone: never published over, never withdrawn, whether or not its
-  server happens to be running. The serve config records no author, so the
-  daemon goes by its own state file instead — anything it did not write down
-  as its own is yours, including a mapping made while it is running.
+- **Touch mappings it didn't create.** A `tailscale serve` you set up by hand is
+  left alone: the daemon never publishes over it or withdraws it, whether or not
+  its server is running. The serve config doesn't record who made a mapping, so
+  the daemon relies on its own state file. Anything it didn't write down as its
+  own is yours, including a mapping you make while it's running.
 - **Expose anything publicly.** It only uses Serve (tailnet-only), never Funnel.
-- **Outlive itself.** On shutdown it withdraws what it published; on startup it
-  clears what a previous run left behind — only what that run recorded as its
-  own, and only where the port has stopped listening.
+- **Leave its own mappings behind.** On shutdown it withdraws what it published.
+  On startup it clears what a previous run left behind, but only mappings that run
+  recorded as its own, and only where the port has stopped listening.
 
 ## Roadmap
 
-- **v0.1** — host ports, macOS and Linux, Telegram and webhook notifications.
-- **v0.2** — Docker source: containers with published ports, discovered through
-  the Docker API, mapped the same way (one host, one port per service — not one
-  tailnet device per container).
-- **v0.3** — opt-in Funnel per port, and Tailscale Services so a service can get
+- **v0.1:** host ports, macOS and Linux, Telegram and webhook notifications.
+- **v0.2:** Docker containers with published ports, discovered through the Docker
+  API and mapped the same way. That means one host with one port per service, not
+  one tailnet device per container.
+- **v0.3:** opt-in Funnel per port, and Tailscale Services so a service can get
   its own MagicDNS name instead of sharing the node's.
 
 ## Security
 
-Automatically publishing ports is a real trade-off. Read
-[SECURITY.md](SECURITY.md) before running it on a machine that has more than dev
-servers on it.
+Publishing ports automatically has risks. Read [SECURITY.md](SECURITY.md) before
+running it on a machine that has more than dev servers on it.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
