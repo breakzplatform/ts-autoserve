@@ -35,11 +35,11 @@ infrastructure (editor bridges, sync daemons, debug ports) that has no business
 on the network. Filtering by "does it answer HTTP?" does not help either: those
 daemons answer HTTP too.
 
-So the default policy (`mode: both`) publishes a port when **either** is true:
+So a port is judged by two tests:
 
-- **It is a known dev-server port** — 3000-3010, 5173-5183, 4200, 4321,
+- **Is it a known dev-server port?** — 3000-3010, 5173-5183, 4200, 4321,
   8000-8010, 8080-8090, 6006, 8888, 19000-19006 and friends.
-- **Its process descends from a coding agent** — Claude Code, Codex, Cursor,
+- **Does its process descend from a coding agent?** — Claude Code, Codex, Cursor,
   Antigravity (`agy`), aider, opencode, goose and anything else you add to the
   pattern.
   The test is process ancestry, so `npm run dev` started inside an agent counts,
@@ -47,18 +47,15 @@ So the default policy (`mode: both`) publishes a port when **either** is true:
   ancestors: a background daemon that merely carries an agent's name in its path
   is not a dev server.
 
-The four modes, picked with `mode:` in the config or `-mode` on the command
-line:
+The mode decides how they combine. Pick it with `mode:` in the config or
+`-mode` on the command line:
 
 | Mode | Publishes | Good for |
 |---|---|---|
-| `both` | **the default** — a port that is either of the two below | a laptop you develop on |
+| `both` | **the default** — a port that passes either test | a laptop you develop on |
 | `dev` | only the known dev-server ports | predictable: nothing new is published unless you list the port |
 | `agent` | only ports whose process descends from a coding agent | a machine where agents do the work and you want nothing else exposed |
 | `all` | every port in `port_range` | short-lived debugging; noisy, read [SECURITY.md](SECURITY.md) first |
-
-Nothing writes a config file for you: an install with no `-mode` runs as
-`both`.
 
 `exclude_ports` always wins, whatever the mode. The defaults exclude Chrome's
 remote-debugging port and a few others that would hand over more than a preview.
@@ -88,11 +85,9 @@ Then install it as a service — one command, no file to copy:
 ```bash
 ts-autoserve service install     # launchd on macOS, systemd --user on Linux
 ts-autoserve service status      # installed? running? which file, which config?
-ts-autoserve service uninstall   # stop it and remove the service file
 ```
 
-Without `-mode`, the service runs the default policy, `both`. To settle that
-choice at install time:
+To pick a mode other than `both` at install time:
 
 ```bash
 ts-autoserve service install -mode agent   # publish only what an agent started
@@ -106,13 +101,6 @@ It writes the service file pointing at the binary you ran, starts it, and keeps
 it running: **it comes back at login and restarts if it dies.** On a headless
 Linux box that nobody logs into, add `sudo loginctl enable-linger $USER` so the
 user service starts at boot.
-
-If a notification token is configured through `token_env`, `service install` copies its
-current value into the service definition, which is written mode 600 — a service
-does not inherit your shell's environment. If you already keep your tokens in a
-`KEY=value` file, point `env_file:` at it instead: the daemon reads the file at
-startup and nothing is copied, so rotating a token means editing one file and
-restarting the service.
 
 The files under `packaging/` are the same definitions, for anyone who would
 rather install them by hand.
@@ -149,20 +137,7 @@ editing `mode:` in the config if you want your own dev servers published too.
 
 ## Configure
 
-Everything has a default; the file is optional. It is looked for in this order,
-on every platform including macOS:
-
-1. `$XDG_CONFIG_HOME/ts-autoserve/config.yaml`
-2. `~/.config/ts-autoserve/config.yaml`
-3. the platform config dir (`~/Library/Application Support/ts-autoserve/config.yaml` on macOS)
-
-or wherever `-config` points.
-
-The daemon also keeps a state file — `$XDG_STATE_HOME/ts-autoserve/state.json`,
-or `~/.local/state/ts-autoserve/state.json` — listing the ports it currently
-has published. That list is how a later run tells its own mappings from yours;
-nothing is meant to be edited there. Delete it and the daemon simply forgets
-what was its, and cleans up nothing it finds.
+Everything has a default; the file is optional.
 
 ```yaml
 mode: both          # dev | agent | both | all
@@ -191,11 +166,35 @@ notify:
     url: https://example.com/hook
 ```
 
+The file is looked for in this order:
+
+1. `$XDG_CONFIG_HOME/ts-autoserve/config.yaml`
+2. `~/.config/ts-autoserve/config.yaml`
+3. the platform config dir (`~/Library/Application Support/ts-autoserve/config.yaml` on macOS)
+
+or wherever `-config` points.
+
+The daemon also keeps a state file at `$XDG_STATE_HOME/ts-autoserve/state.json`
+(or `~/.local/state/ts-autoserve/state.json`), recording which mappings are its
+own. It is not meant to be edited; delete it and the daemon forgets what was
+its, and cleans up nothing it finds.
+
 The webhook receives one JSON object per event:
 
 ```json
 {"kind":"up","port":5173,"url":"https://laptop.example-tailnet.ts.net:5173/","proc":"node","source":"host","text":"node up on port 5173\nhttps://..."}
 ```
+
+### Tokens and the service
+
+A service does not inherit your shell's environment, so a token named by
+`token_env` has to reach it another way:
+
+- **Copied at install.** Export the variable before running `service install`;
+  its current value is written into the service definition, which is mode 600.
+- **Read from a file.** Point `env_file:` at a `KEY=value` file you already
+  keep. The daemon reads it at startup and nothing is copied, so rotating a
+  token means editing that file and restarting the service.
 
 ### Changing the messages
 
