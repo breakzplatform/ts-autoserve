@@ -458,3 +458,56 @@ func TestSeveralNewPortsArePublishedInOneCall(t *testing.T) {
 		t.Errorf("published %v, want all four ports", pub.publishes)
 	}
 }
+
+type pidSource struct{ listeners []discover.Listener }
+
+func (pidSource) Name() string { return "fake" }
+
+func (f *pidSource) Listeners(context.Context) ([]discover.Listener, error) {
+	return f.listeners, nil
+}
+
+func TestAncestryIsWalkedOncePerProcess(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeAgent
+	src := &pidSource{listeners: []discover.Listener{
+		{Port: 4000, PID: 100, Proc: "node", Source: "fake"},
+		{Port: 4001, PID: 200, Proc: "rapportd", Source: "fake"},
+	}}
+	pub := newFakePub()
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	walks := map[int]int{}
+	d.spawned = func(pid int) bool { walks[pid]++; return pid == 100 }
+
+	poll := func() {
+		t.Helper()
+		if err := d.Poll(context.Background()); err != nil {
+			t.Fatalf("Poll: %v", err)
+		}
+	}
+	for range 3 {
+		poll()
+	}
+	if walks[100] != 1 || walks[200] != 1 {
+		t.Fatalf("walks = %v, want each process walked once", walks)
+	}
+	if !pub.published[4000] || pub.published[4001] {
+		t.Fatalf("published %v, want only 4000", pub.published)
+	}
+
+	// The same pid now names another process: judged afresh.
+	src.listeners[1].Proc = "vite"
+	poll()
+	if walks[200] != 2 {
+		t.Errorf("reused pid walked %d times, want 2", walks[200])
+	}
+
+	// A process that stops listening is forgotten, so coming back is a new walk.
+	src.listeners = src.listeners[:1]
+	poll()
+	src.listeners = append(src.listeners, discover.Listener{Port: 4001, PID: 200, Proc: "vite", Source: "fake"})
+	poll()
+	if walks[200] != 3 {
+		t.Errorf("returning process walked %d times, want 3", walks[200])
+	}
+}

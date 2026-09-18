@@ -40,10 +40,18 @@ type Daemon struct {
 	Store     Store
 	DryRun    bool
 
-	detector agent.Detector
-	owned    map[int]*entry // ports this daemon published, by port
-	foreign  map[int]bool   // published by someone else: never ours to touch
+	spawned  func(pid int) bool // the ancestry walk; agent.Detector.Spawned
+	ancestry map[process]bool   // spawned's verdict, for processes still listening
+	owned    map[int]*entry     // ports this daemon published, by port
+	foreign  map[int]bool       // published by someone else: never ours to touch
 	started  bool
+}
+
+// process names a listening process. The name guards against a pid reused
+// between two polls inheriting the previous process's verdict.
+type process struct {
+	pid  int
+	proc string
 }
 
 type entry struct {
@@ -59,7 +67,8 @@ func New(cfg config.Config, srcs []discover.Source, pub Publisher, ns []notify.N
 		Sources:   srcs,
 		Pub:       pub,
 		Notifiers: ns,
-		detector:  agent.Detector{Pattern: cfg.Agent},
+		spawned:   agent.Detector{Pattern: cfg.Agent}.Spawned,
+		ancestry:  map[process]bool{},
 		owned:     map[int]*entry{},
 		foreign:   map[int]bool{},
 	}
@@ -343,6 +352,7 @@ func (d *Daemon) candidates(ctx context.Context) (map[int]discover.Listener, err
 	if err != nil {
 		return nil, err
 	}
+	d.forgetAncestry(all)
 	out := make(map[int]discover.Listener, len(all))
 	for port, l := range all {
 		if d.wanted(l) {
@@ -374,7 +384,30 @@ func (d *Daemon) agentSpawned(l discover.Listener) bool {
 	if l.PID == 0 {
 		return false
 	}
-	return d.detector.Spawned(l.PID)
+	key := process{l.PID, l.Proc}
+	if v, ok := d.ancestry[key]; ok {
+		return v
+	}
+	v := d.spawned(l.PID)
+	d.ancestry[key] = v
+	return v
+}
+
+// forgetAncestry drops the verdicts of processes that no longer listen.
+//
+// Walking the ancestry costs one ps per parent on macOS, and the same ports are
+// judged every poll; a process's ancestry does not change while it lives, so
+// each one is walked once, when it first appears.
+func (d *Daemon) forgetAncestry(live map[int]discover.Listener) {
+	keep := make(map[process]bool, len(live))
+	for _, l := range live {
+		keep[process{l.PID, l.Proc}] = true
+	}
+	for key := range d.ancestry {
+		if !keep[key] {
+			delete(d.ancestry, key)
+		}
+	}
 }
 
 // notify renders an event's text and sends it, unless the config muted it.
