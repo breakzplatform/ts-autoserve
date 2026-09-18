@@ -16,6 +16,7 @@ func TestDefaultAgentPatternMatchesAgents(t *testing.T) {
 		"node /opt/homebrew/bin/codex --resume",
 		"/usr/local/bin/agy",
 		"agy chat",
+		"/opt/homebrew/bin/grok",
 		"/Applications/Antigravity.app/Contents/MacOS/Antigravity",
 	} {
 		if !cfg.Agent.MatchString(cmd) {
@@ -25,10 +26,11 @@ func TestDefaultAgentPatternMatchesAgents(t *testing.T) {
 }
 
 func TestDefaultAgentPatternAvoidsSubstringTraps(t *testing.T) {
-	// "agy" is short enough to appear inside ordinary words and paths.
+	// "agy" and "grok" are short enough to appear inside other names ("strategy", "ngrok").
 	for _, cmd := range []string{
 		"node /Users/me/strategy-dashboard/node_modules/.bin/vite",
 		"/usr/bin/python3 /opt/legacy/server.py",
+		"ngrok http 3000",
 	} {
 		if cfg, _ := Load("no-such-config.yaml"); cfg.Agent.MatchString(cmd) {
 			t.Errorf("agent pattern wrongly matched %q", cmd)

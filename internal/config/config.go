@@ -118,7 +118,7 @@ func Default() Config {
 		},
 		PortRange: []string{"3000-9999"},
 		// \b around short names: "agy" would otherwise match "strategy".
-		AgentPattern: `claude|codex|cursor|windsurf|antigravity|\bagy\b|aider|opencode|goose|devin|copilot`,
+		AgentPattern: `claude|codex|cursor|windsurf|antigravity|\bagy\b|aider|opencode|goose|devin|copilot|\bgrok\b`,
 	}
 }
 
