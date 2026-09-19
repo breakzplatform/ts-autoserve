@@ -372,16 +372,24 @@ func (d *Daemon) wanted(l discover.Listener) bool {
 	case config.ModeDev:
 		return d.Cfg.Dev.Has(l.Port)
 	case config.ModeAgent:
-		return d.agentSpawned(l)
+		return d.wantsAgentPort(l)
 	case config.ModeAll:
 		return d.Cfg.Range.Has(l.Port)
 	default:
-		return d.Cfg.Dev.Has(l.Port) || d.agentSpawned(l)
+		return d.Cfg.Dev.Has(l.Port) || d.wantsAgentPort(l)
 	}
 }
 
-func (d *Daemon) agentSpawned(l discover.Listener) bool {
+func (d *Daemon) wantsAgentPort(l discover.Listener) bool {
 	if l.PID == 0 {
+		return false
+	}
+	// An agent's own RPC sockets sit in the ephemeral range and are replaced on
+	// every call, so publishing them means a URL that is gone before anyone can
+	// open it, plus a notification each time. A dev server the agent starts
+	// binds a stable low port and still gets through. dev_ports wins, for the
+	// rare server that really does listen up there.
+	if from := d.Cfg.AgentEphemeralFrom; from != nil && *from > 0 && l.Port >= *from && !d.Cfg.Dev.Has(l.Port) {
 		return false
 	}
 	key := process{l.PID, l.Proc}

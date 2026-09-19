@@ -28,6 +28,8 @@ const (
 	ModeAll Mode = "all"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 // Config is the on-disk configuration.
 type Config struct {
 	Mode         Mode          `yaml:"mode"`
@@ -37,8 +39,13 @@ type Config struct {
 	ExcludePorts []string      `yaml:"exclude_ports"` // never published, whatever the mode says
 	PortRange    []string      `yaml:"port_range"`    // bounds for mode "all"
 	AgentPattern string        `yaml:"agent_pattern"` // process names that count as coding agents
-	EnvFile      string        `yaml:"env_file"`      // KEY=value file read into the environment at startup
-	Notify       Notify        `yaml:"notify"`
+	// AgentEphemeralFrom is the first port treated as ephemeral in agent mode.
+	// An agent's own RPC sockets land in this range; a dev server it starts does
+	// not. 0 turns the check off. Ports in dev_ports are published anyway.
+	// A pointer, so an explicit 0 in the file is told apart from an absent field.
+	AgentEphemeralFrom *int   `yaml:"agent_ephemeral_from"`
+	EnvFile            string `yaml:"env_file"` // KEY=value file read into the environment at startup
+	Notify             Notify `yaml:"notify"`
 
 	Dev     portset.Set    `yaml:"-"`
 	Exclude portset.Set    `yaml:"-"`
@@ -119,6 +126,9 @@ func Default() Config {
 		PortRange: []string{"3000-9999"},
 		// \b around short names: "agy" would otherwise match "strategy".
 		AgentPattern: `claude|codex|cursor|windsurf|antigravity|\bagy\b|aider|opencode|goose|devin|copilot|\bgrok\b`,
+		// IANA ephemeral range. Agents talk to their own helpers over sockets the
+		// kernel hands out from here, and those come and go with every call.
+		AgentEphemeralFrom: ptr(49152),
 	}
 }
 
@@ -204,6 +214,9 @@ func merge(base, file Config) Config {
 	}
 	if file.AgentPattern != "" {
 		base.AgentPattern = file.AgentPattern
+	}
+	if file.AgentEphemeralFrom != nil {
+		base.AgentEphemeralFrom = file.AgentEphemeralFrom
 	}
 	base.EnvFile = file.EnvFile
 	base.Notify = file.Notify

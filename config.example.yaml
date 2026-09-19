@@ -28,6 +28,11 @@ port_range:
 # bare "grok" would match "ngrok".
 agent_pattern: "claude|codex|cursor|windsurf|antigravity|\\bagy\\b|aider|opencode|goose|devin|copilot|\\bgrok\\b"
 
+# In agent mode, ports from here up are ignored: that is where an agent's own
+# RPC sockets land, and they change on every call. A dev server binds lower.
+# Anything in dev_ports is published anyway. 0 turns the check off.
+agent_ephemeral_from: 49152
+
 # KEY=value file read into the environment at startup (tokens you already keep).
 # env_file: ~/.secrets/env
 
