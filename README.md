@@ -61,6 +61,13 @@ The mode decides how the two tests combine. Set it with `mode:` in the config or
 `exclude_ports` always wins, whatever the mode. The defaults exclude Chrome's
 remote-debugging port and a few others that would hand over more than a preview.
 
+The agent test ignores the ephemeral range (`agent_ephemeral_from`, 49152 by
+default). An agent's own RPC sockets live there and are replaced on every call,
+so publishing them means a URL that dies before anyone opens it and a
+notification each time; a dev server the agent starts binds a stable low port
+and still gets through. A port in `dev_ports` is published even when it falls in
+the range, and `agent_ephemeral_from: 0` turns the check off.
+
 ## Install
 
 Requires Go 1.24+ and a working Tailscale install.
@@ -151,6 +158,7 @@ exclude_ports: ["9222", "5000"]
 port_range: ["3000-9999"]   # only used by mode "all"
 
 agent_pattern: "claude|codex|cursor|windsurf|antigravity|\\bagy\\b|aider|opencode|goose|devin|copilot|\\bgrok\\b"
+agent_ephemeral_from: 49152   # in agent mode, ignore ports from here up; 0 disables
 
 # Optional. KEY=value lines read into the environment at startup, so token_env
 # can name a variable kept in a file you already have. Variables set in the

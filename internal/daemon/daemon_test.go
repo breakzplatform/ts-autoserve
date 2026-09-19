@@ -8,6 +8,7 @@ import (
 	"github.com/breakzplatform/ts-autoserve/internal/config"
 	"github.com/breakzplatform/ts-autoserve/internal/discover"
 	"github.com/breakzplatform/ts-autoserve/internal/notify"
+	"github.com/breakzplatform/ts-autoserve/internal/portset"
 )
 
 type fakePub struct {
@@ -509,5 +510,88 @@ func TestAncestryIsWalkedOncePerProcess(t *testing.T) {
 	poll()
 	if walks[200] != 3 {
 		t.Errorf("returning process walked %d times, want 3", walks[200])
+	}
+}
+
+func TestAgentEphemeralPortIsNotPublished(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeAgent
+	src := &pidSource{listeners: []discover.Listener{
+		{Port: 55059, PID: 100, Proc: "agy", Source: "fake"},
+		{Port: 3000, PID: 100, Proc: "node", Source: "fake"},
+	}}
+	pub := newFakePub()
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.spawned = func(int) bool { return true }
+
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if pub.published[55059] {
+		t.Errorf("ephemeral port 55059 was published")
+	}
+	if !pub.published[3000] {
+		t.Errorf("dev server on 3000 was not published")
+	}
+}
+
+func TestAgentEphemeralPortIsPublishedWhenListedAsDevPort(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeAgent
+	dev, err := portset.Parse([]string{"55059"})
+	if err != nil {
+		t.Fatalf("portset.Parse: %v", err)
+	}
+	cfg.Dev = dev
+	src := &pidSource{listeners: []discover.Listener{
+		{Port: 55059, PID: 100, Proc: "agy", Source: "fake"},
+	}}
+	pub := newFakePub()
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.spawned = func(int) bool { return true }
+
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if !pub.published[55059] {
+		t.Errorf("port listed in dev_ports was not published")
+	}
+}
+
+func TestAgentEphemeralPortIsPublishedWhenCheckIsOff(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeAgent
+	off := 0
+	cfg.AgentEphemeralFrom = &off
+	src := &pidSource{listeners: []discover.Listener{
+		{Port: 55059, PID: 100, Proc: "agy", Source: "fake"},
+	}}
+	pub := newFakePub()
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.spawned = func(int) bool { return true }
+
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if !pub.published[55059] {
+		t.Errorf("agent_ephemeral_from: 0 should turn the check off, but 55059 was not published")
+	}
+}
+
+func TestAgentEphemeralPortIsNotPublishedInBothMode(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Mode = config.ModeBoth
+	src := &pidSource{listeners: []discover.Listener{
+		{Port: 55059, PID: 100, Proc: "agy", Source: "fake"},
+	}}
+	pub := newFakePub()
+	d := New(cfg, []discover.Source{src}, pub, nil)
+	d.spawned = func(int) bool { return true }
+
+	if err := d.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if pub.published[55059] {
+		t.Errorf("ephemeral port 55059 was published in mode both")
 	}
 }
