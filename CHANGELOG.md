@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prebuilt binaries on every release: a universal binary for macOS and amd64
+  and arm64 builds for Linux, with SHA-256 checksums. Installing no longer
+  needs Go.
+- A demo GIF in the README, and a comparison with `tailscale serve` and
+  tsdproxy.
+
 ## [0.1.0] - 2026-09-20
 
 First tagged release. The daemon watches for local dev servers and publishes

@@ -68,7 +68,30 @@ the range, and `agent_ephemeral_from: 0` turns the check off.
 
 ## Install
 
-Requires Go 1.24+ and a working Tailscale install.
+You need Tailscale running on the machine, with
+[HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates)
+turned on for your tailnet, since Serve uses them.
+
+Download the binary for your platform from the
+[latest release](https://github.com/breakzplatform/ts-autoserve/releases/latest)
+and put it somewhere on your `PATH`:
+
+```bash
+# macOS: one universal binary for Apple Silicon and Intel
+curl -fsSL https://github.com/breakzplatform/ts-autoserve/releases/latest/download/ts-autoserve_darwin_all.tar.gz | tar -xz ts-autoserve
+
+# Linux on x86-64 (use ts-autoserve_linux_arm64.tar.gz on ARM)
+curl -fsSL https://github.com/breakzplatform/ts-autoserve/releases/latest/download/ts-autoserve_linux_amd64.tar.gz | tar -xz ts-autoserve
+
+mkdir -p ~/.local/bin && mv ts-autoserve ~/.local/bin/   # add it to PATH if it isn't
+```
+
+Each release lists SHA-256 sums in `checksums.txt`. The macOS binary isn't
+notarized. That doesn't matter when you download it with `curl` as above, but if
+you download it with a browser, macOS will refuse to run it until you clear the
+quarantine flag with `xattr -d com.apple.quarantine ts-autoserve`.
+
+To build it from source instead (Go 1.27 or newer):
 
 ```bash
 go install github.com/breakzplatform/ts-autoserve/cmd/ts-autoserve@latest
@@ -110,7 +133,7 @@ dies. On a headless Linux box that nobody logs into, add
 `sudo loginctl enable-linger $USER` so the user service starts at boot.
 
 The files under `packaging/` are the same definitions, if you'd rather install
-them by hand.
+them by hand. Change the binary path in them to wherever you put it.
 
 <details>
 <summary><b>Let a coding agent install it</b> (a prompt to paste; it installs in <code>agent</code> mode)</summary>
@@ -121,8 +144,11 @@ The agent you already have open can do the whole thing:
 Install ts-autoserve on this machine so the dev servers you start are reachable
 from my phone over Tailscale:
 
-1. go install github.com/breakzplatform/ts-autoserve/cmd/ts-autoserve@latest
-   and make sure the resulting binary is on PATH.
+1. Download the ts-autoserve binary for this OS and CPU from
+   https://github.com/breakzplatform/ts-autoserve/releases/latest
+   (ts-autoserve_darwin_all.tar.gz on macOS, ts-autoserve_linux_amd64.tar.gz
+   or ts-autoserve_linux_arm64.tar.gz on Linux), check it against
+   checksums.txt, and put it in ~/.local/bin, making sure that is on PATH.
 2. Run `ts-autoserve -once -dry-run -v` and show me what it would publish.
    If it fails because this user cannot change the serve config, stop and ask
    me to run `sudo tailscale set --operator=$USER` -- that needs my password,
@@ -269,6 +295,27 @@ watching it work before you hand it to the OS.
 - **Leave its own mappings behind.** On shutdown it withdraws what it published.
   On startup it clears what a previous run left behind, but only mappings that run
   recorded as its own, and only where the port has stopped listening.
+
+## How it compares
+
+ts-autoserve doesn't do anything `tailscale serve` can't. It runs Serve for you,
+as servers come and go. How it compares with doing that by hand, and with
+[tsdproxy](https://github.com/almeidapaulopt/tsdproxy), the best-known tool that
+automates Tailscale proxies:
+
+| | ts-autoserve | `tailscale serve` | tsdproxy |
+|---|---|---|---|
+| What you do per service | nothing | one command per port | add Docker labels, or an entry in a YAML list |
+| Where it's reachable | `<machine>.<tailnet>.ts.net:<port>` | same | its own tailnet machine, `<name>.<tailnet>.ts.net` |
+| When it's removed | when the port stops listening | when you turn it off (`--bg` survives reboots) | when the container stops |
+| What it needs | operator permission on tailscaled | same | the Docker socket, plus an auth key, an OAuth client or a login per proxy |
+| Public (Funnel) | no (opt-in per port is planned) | with `tailscale funnel` | opt-in per port |
+| Extras | Telegram or webhook notifications | Tailscale Services, for a name per service | dashboard, TCP/UDP, webhook notifications, REST API |
+
+Use plain `tailscale serve --bg` when you have one or two ports that never
+change. Use tsdproxy for long-running containers that deserve their own name and
+device. ts-autoserve is for dev servers, which move ports, restart all day, and
+aren't worth naming.
 
 ## Roadmap
 
