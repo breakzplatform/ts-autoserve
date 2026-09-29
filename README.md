@@ -10,14 +10,12 @@ It's meant for developing from a phone. If you turn notifications on, the URL
 arrives on Telegram (or any webhook) as soon as the server is up. Notifications
 are off by default, and the daemon works fine without ever sending a message.
 
-```
-$ npm run dev
-  VITE ready in 412 ms  ➜  http://localhost:5173/
+![A Vite dev server starts in one pane; in the other, ts-autoserve publishes it at https://laptop.example-tailnet.ts.net:5173/ and withdraws it when the server stops.](docs/demo.gif)
 
-# on your phone, a second later:
-  node up on port 5173
-  https://laptop.example-tailnet.ts.net:5173/
-```
+<sup>Recorded with [VHS](https://github.com/charmbracelet/vhs) from
+[docs/demo.tape](docs/demo.tape). It runs in a container with no tailnet, so a
+stand-in answers for tailscaled and the hostname is made up. The ts-autoserve
+binary is the real one, built from this repo.</sup>
 
 ## How it works
 
