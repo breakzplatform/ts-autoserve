@@ -76,3 +76,17 @@ func TestMessagesDistinguishUnsetFromEmpty(t *testing.T) {
 		t.Errorf("up = %v, want the template", m.Up)
 	}
 }
+
+func TestEnvValueBareCommentAfterTab(t *testing.T) {
+	for raw, want := range map[string]string{
+		"abc #note":  "abc",
+		"abc\t#note": "abc",
+		"a#b":        "a#b",
+		"'x #y'":     "x #y",
+	} {
+		got, err := envValue(raw)
+		if err != nil || got != want {
+			t.Errorf("envValue(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+}

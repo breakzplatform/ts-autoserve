@@ -72,8 +72,11 @@ func envValue(raw string) (string, error) {
 		return os.ExpandEnv(val), nil
 	}
 	// A bare value ends at a comment, as it would in the shell.
-	if i := strings.Index(raw, " #"); i >= 0 {
-		raw = strings.TrimSpace(raw[:i])
+	for i := 1; i < len(raw); i++ {
+		if raw[i] == '#' && (raw[i-1] == ' ' || raw[i-1] == '\t') {
+			raw = strings.TrimSpace(raw[:i])
+			break
+		}
 	}
 	return os.ExpandEnv(raw), nil
 }
