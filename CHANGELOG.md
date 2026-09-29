@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-29
+
 ### Added
 
 - Prebuilt binaries on every release: a universal binary for macOS and amd64
@@ -47,5 +49,6 @@ them on the tailnet, without per-project setup.
   a state file and withdraws nothing else, so a `tailscale serve` you set up
   yourself survives its startup and its shutdown.
 
-[Unreleased]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/breakzplatform/ts-autoserve/releases/tag/v0.1.0
