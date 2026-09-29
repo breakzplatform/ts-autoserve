@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: ts-autoserve
+
+before:
+  hooks:
+    - go mod tidy -diff
+    - go test ./...
+
+builds:
+  - id: ts-autoserve
+    main: ./cmd/ts-autoserve
+    binary: ts-autoserve
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# One macOS download that runs on both Apple Silicon and Intel.
+universal_binaries:
+  - id: ts-autoserve
+    replace: true
+
+archives:
+  - id: ts-autoserve
+    formats: [tar.gz]
+    # No version in the name, so /releases/latest/download/<name> is a stable
+    # URL the README can point at.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - config.example.yaml
+      - packaging/**/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  # Release notes come from CHANGELOG.md (see the release workflow).
+  disable: true
+
+release:
+  github:
+    owner: breakzplatform
+    name: ts-autoserve
+  draft: false
+  prerelease: auto
