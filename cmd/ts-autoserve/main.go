@@ -24,6 +24,7 @@ import (
 	"github.com/breakzplatform/ts-autoserve/internal/notify"
 	"github.com/breakzplatform/ts-autoserve/internal/service"
 	"github.com/breakzplatform/ts-autoserve/internal/state"
+	"github.com/breakzplatform/ts-autoserve/internal/status"
 	"github.com/breakzplatform/ts-autoserve/internal/tsserve"
 )
 
@@ -72,11 +73,12 @@ func main() {
 	// Commands come first, flags after. Everything about the OS service is
 	// grouped under "service", because that is a different subject from the
 	// daemon's own work: "service status" is whether the daemon is running,
-	// while a later plain "status" will be what it has published.
+	// while plain "status" is what it has published.
 	//   ts-autoserve                      run the daemon
 	//   ts-autoserve service install      install and start the user service
 	//   ts-autoserve service uninstall    stop and remove it
 	//   ts-autoserve service status       is it installed and running?
+	//   ts-autoserve status [-json]       what is published, and the URLs
 	//   ts-autoserve version
 	cmd, sub := "", ""
 	args := os.Args[1:]
@@ -95,6 +97,7 @@ func main() {
 		once    = fs.Bool("once", false, "run a single pass and exit")
 		dryRun  = fs.Bool("dry-run", false, "report what would be published, change nothing")
 		verbose = fs.Bool("v", false, "debug logging")
+		asJSON  = fs.Bool("json", false, "status: print JSON instead of text")
 	)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -112,6 +115,8 @@ func main() {
 		err = run(*cfgPath, *mode, *once, *dryRun)
 	case "service":
 		err = serviceCommand(sub, fs, *cfgPath, *mode)
+	case "status":
+		err = statusCommand(*asJSON)
 	case "version":
 		fmt.Println("ts-autoserve", buildVersion())
 	case "help":
@@ -138,6 +143,7 @@ Usage:
                                     to the config file; default is both)
   ts-autoserve service uninstall    stop the user service and remove it
   ts-autoserve service status       is the service installed and running?
+  ts-autoserve status [-json]       node name, published URLs, service state
   ts-autoserve version              print version
 
 Flags:
@@ -176,6 +182,37 @@ func serviceCommand(sub string, fs *flag.FlagSet, cfgPath, mode string) error {
 		fs.Usage()
 		return fmt.Errorf("unknown service subcommand %q", sub)
 	}
+}
+
+// statusCommand reports what tailscaled publishes. It never writes the serve
+// config.
+func statusCommand(asJSON bool) error {
+	ctx := context.Background()
+	pub := tsserve.New()
+	node, err := pub.DNSName(ctx)
+	if err != nil {
+		return fmt.Errorf("%w (is tailscaled running?)", err)
+	}
+	published, err := pub.Serving(ctx)
+	if err != nil {
+		return err
+	}
+	managed, err := state.New(state.DefaultPath()).Load()
+	if err != nil {
+		return err
+	}
+	st, err := service.Status()
+	if err != nil {
+		return err
+	}
+	report := status.Build(node, published, managed, status.Service{
+		Installed: st.Installed, Running: st.Running, Detail: st.Detail, File: st.Path,
+	})
+	if asJSON {
+		return status.WriteJSON(os.Stdout, report)
+	}
+	status.WriteText(os.Stdout, report)
+	return nil
 }
 
 // manageService installs or removes the OS service, so nobody has to copy a

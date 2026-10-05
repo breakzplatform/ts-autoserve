@@ -270,6 +270,7 @@ ts-autoserve [flags]              run the daemon
 ts-autoserve service install      install and start it as a user service
 ts-autoserve service uninstall    stop the user service and remove it
 ts-autoserve service status       is the service installed and running?
+ts-autoserve status [-json]       node name, published URLs, service state
 ts-autoserve version              print version
 ```
 
@@ -283,6 +284,29 @@ watching it work before you hand it to the OS.
 | `-once` | single pass, then exit |
 | `-dry-run` | report what would change, change nothing |
 | `-v` | debug logging |
+| `-json` | with `status`: print JSON instead of text |
+
+### `status -json`
+
+`status` only reads: it never changes the serve config. The JSON is a stable
+contract for scripts and agents (`version` changes only on a breaking change):
+
+```json
+{
+  "version": 1,
+  "node": "laptop.example-tailnet.ts.net",
+  "endpoints": [
+    {"port": 3000, "url": "https://laptop.example-tailnet.ts.net:3000/",
+     "proxy": "http://127.0.0.1:3000", "managed": true}
+  ],
+  "service": {"installed": true, "running": true, "detail": "pid 42", "file": "..."}
+}
+```
+
+`endpoints` lists every HTTPS port tailscaled serves, sorted by port. `managed`
+is true for ports ts-autoserve published and false for mappings set up by hand;
+`proxy` is empty when a mapping is not a plain reverse proxy. It exits non-zero
+when tailscaled is unreachable.
 
 ## What it will not do
 

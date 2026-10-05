@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ts-autoserve status`, with `-json` for scripts and agents: the node's
+  MagicDNS name, the HTTPS ports and URLs tailscaled serves, and whether the
+  user service is running. It never changes the serve config.
+
 ## [0.1.1] - 2026-09-29
 
 ### Added
