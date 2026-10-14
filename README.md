@@ -325,14 +325,14 @@ when tailscaled is unreachable.
 ts-autoserve doesn't do anything `tailscale serve` can't. It runs Serve for you,
 as servers come and go. How it compares with doing that by hand, and with
 [tsdproxy](https://github.com/almeidapaulopt/tsdproxy), the best-known tool that
-automates Tailscale proxies:
+automates Tailscale proxies (compared with its latest stable release, v2.3.4):
 
 | | ts-autoserve | `tailscale serve` | tsdproxy |
 |---|---|---|---|
 | What you do per service | nothing | one command per port | add Docker labels, or an entry in a YAML list |
 | Where it's reachable | `<machine>.<tailnet>.ts.net:<port>` | same | its own tailnet machine, `<name>.<tailnet>.ts.net` |
-| When it's removed | when the port stops listening | when you turn it off (`--bg` survives reboots) | when the container stops |
-| What it needs | operator permission on tailscaled | same | the Docker socket, plus an auth key, an OAuth client or a login per proxy |
+| When it's removed | when the port stops listening | when you turn it off (`--bg` survives reboots) | when the container stops or its list entry is removed |
+| What it needs | operator permission on tailscaled | same | an auth key, an OAuth client or a login per proxy, plus the Docker socket for labels |
 | Public (Funnel) | no (opt-in per port is planned) | with `tailscale funnel` | opt-in per port |
 | Extras | Telegram or webhook notifications | Tailscale Services, for a name per service | dashboard, TCP/UDP, webhook notifications, REST API |
 
