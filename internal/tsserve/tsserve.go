@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/breakzplatform/ts-autoserve/internal/status"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 )
@@ -132,4 +133,34 @@ func (c *Client) mutate(ctx context.Context, ports []int, fn func(*ipn.ServeConf
 		return fmt.Errorf("set serve config: %w", err)
 	}
 	return nil
+}
+
+// Serving lists the HTTPS ports this node serves, with the proxy target of
+// each. It only reads the serve config.
+func (c *Client) Serving(ctx context.Context) ([]status.Published, error) {
+	host, err := c.DNSName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sc, err := c.lc.GetServeConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get serve config: %w", err)
+	}
+	var out []status.Published
+	if sc == nil {
+		return out, nil
+	}
+	for port, h := range sc.TCP {
+		if h == nil || !h.HTTPS {
+			continue
+		}
+		p := status.Published{Port: int(port)}
+		if web := sc.Web[ipn.HostPort(fmt.Sprintf("%s:%d", host, port))]; web != nil {
+			if root := web.Handlers["/"]; root != nil {
+				p.Proxy = root.Proxy
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
