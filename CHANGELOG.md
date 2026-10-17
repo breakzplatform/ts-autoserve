@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Added
 
 - `ts-autoserve status`, with `-json` for scripts and agents: the node's
-  MagicDNS name, the HTTPS ports and URLs tailscaled serves, and whether the
-  user service is running. It never changes the serve config.
+  MagicDNS name, the HTTPS ports and URLs tailscaled serves, whether
+  ts-autoserve or a person published each one, the process (pid and command
+  name) listening behind it, and whether the user service is running. It never
+  changes the serve config. The JSON schema is documented in the README and
+  starts at version 1.
+
+### Fixed
+
+- `service install` on Linux escapes what it writes into the systemd unit. A
+  binary path with a space, or a token containing a quote, a backslash or `%`,
+  produced a unit that systemd read differently. On both platforms, a value
+  with a line break or another control character, or an invalid variable name,
+  is now refused before anything is written.
 
 ## [0.1.1] - 2026-09-29
 
@@ -55,6 +68,7 @@ them on the tailnet, without per-project setup.
   a state file and withdraws nothing else, so a `tailscale serve` you set up
   yourself survives its startup and its shutdown.
 
-[Unreleased]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/breakzplatform/ts-autoserve/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/breakzplatform/ts-autoserve/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/breakzplatform/ts-autoserve/releases/tag/v0.1.0
