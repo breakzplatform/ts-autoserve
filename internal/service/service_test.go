@@ -2,11 +2,16 @@ package service
 
 import (
 	"encoding/xml"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // plistTexts returns the text of every <key> and <string> in document order,
@@ -226,5 +231,185 @@ func TestSortedKeys(t *testing.T) {
 	got := sortedKeys(map[string]string{"c": "", "a": "", "b": "", "B": ""})
 	if want := []string{"B", "a", "b", "c"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("sortedKeys = %v, want %v", got, want)
+	}
+}
+
+// fakeOS records the commands the installer runs instead of running them.
+type fakeOS struct {
+	calls []string
+	fail  map[string]int // command prefix -> how many times to fail it
+}
+
+func (f *fakeOS) run(name string, args ...string) error {
+	call := strings.Join(append([]string{name}, args...), " ")
+	f.calls = append(f.calls, call)
+	for prefix, n := range f.fail {
+		if strings.HasPrefix(call, prefix) && n != 0 {
+			f.fail[prefix] = n - 1
+			return errors.New("failed: " + call)
+		}
+	}
+	return nil
+}
+
+func withFakeOS(t *testing.T, f *fakeOS) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	oldRun, oldSleep := runCmd, sleep
+	runCmd, sleep = f.run, func(time.Duration) {}
+	t.Cleanup(func() { runCmd, sleep = oldRun, oldSleep })
+	return home
+}
+
+func mode(t *testing.T, path string) fs.FileMode {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Mode().Perm()
+}
+
+func TestInstallSystemdWritesPrivateUnitAndStartsIt(t *testing.T) {
+	f := &fakeOS{}
+	home := withFakeOS(t, f)
+	path := filepath.Join(home, ".config", "systemd", "user", UnitName)
+
+	// A unit left from an earlier install with looser permissions must not
+	// keep them once a token is written into it.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := installSystemd("/home/dev/.local/bin/ts-autoserve", map[string]string{"TELEGRAM_BOT_TOKEN": "123:abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != path {
+		t.Errorf("path = %s, want %s", got, path)
+	}
+	if m := mode(t, path); m != 0o600 {
+		t.Errorf("unit mode = %o, want 600", m)
+	}
+	data, _ := os.ReadFile(path)
+	for _, want := range []string{"ExecStart=/home/dev/.local/bin/ts-autoserve\n", `Environment="TELEGRAM_BOT_TOKEN=123:abc"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("unit lacks %q:\n%s", want, data)
+		}
+	}
+	want := []string{
+		"systemctl --user daemon-reload",
+		"systemctl --user enable --now " + UnitName,
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Errorf("commands = %q, want %q", f.calls, want)
+	}
+
+	f.calls = nil
+	if _, err := uninstallSystemd(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("unit still there after uninstall: %v", err)
+	}
+	want = []string{
+		"systemctl --user disable --now " + UnitName,
+		"systemctl --user daemon-reload",
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Errorf("uninstall commands = %q, want %q", f.calls, want)
+	}
+	// Uninstalling twice is not an error.
+	if _, err := uninstallSystemd(); err != nil {
+		t.Errorf("second uninstall: %v", err)
+	}
+}
+
+func TestInstallSystemdReportsAFailedStart(t *testing.T) {
+	f := &fakeOS{fail: map[string]int{"systemctl --user enable": 1}}
+	home := withFakeOS(t, f)
+	path, err := installSystemd("/bin/ts-autoserve", nil)
+	if err == nil || !strings.Contains(err.Error(), "systemctl enable") {
+		t.Fatalf("err = %v, want the enable failure", err)
+	}
+	if path != filepath.Join(home, ".config", "systemd", "user", UnitName) {
+		t.Errorf("path = %s: the caller should still learn where the unit is", path)
+	}
+}
+
+func TestInstallLaunchdWritesPrivatePlistAndBootstraps(t *testing.T) {
+	// launchctl print failing means the old job is gone; bootstrap fails
+	// once, as it does while launchd is still tearing the old job down.
+	f := &fakeOS{fail: map[string]int{"launchctl print": -1, "launchctl bootstrap": 1}}
+	home := withFakeOS(t, f)
+
+	path, err := installLaunchd("/Users/dev/.local/bin/ts-autoserve", map[string]string{"TELEGRAM_BOT_TOKEN": "a&b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "Library", "LaunchAgents", Label+".plist"); path != want {
+		t.Errorf("path = %s, want %s", path, want)
+	}
+	if m := mode(t, path); m != 0o600 {
+		t.Errorf("plist mode = %o, want 600", m)
+	}
+	data, _ := os.ReadFile(path)
+	if texts := plistTexts(t, string(data)); indexOf(texts, "a&b") < 0 {
+		t.Errorf("token did not survive: %q", texts)
+	}
+
+	target := "gui/" + strconv.Itoa(os.Getuid())
+	want := []string{
+		"launchctl bootout " + target + "/" + Label,
+		"launchctl print " + target + "/" + Label,
+		"launchctl bootstrap " + target + " " + path,
+		"launchctl bootstrap " + target + " " + path,
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Errorf("commands = %q, want %q", f.calls, want)
+	}
+
+	if _, err := uninstallLaunchd(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("plist still there after uninstall: %v", err)
+	}
+}
+
+func TestInstallLaunchdGivesUpAfterThreeTries(t *testing.T) {
+	f := &fakeOS{fail: map[string]int{"launchctl print": -1, "launchctl bootstrap": -1}}
+	withFakeOS(t, f)
+	if _, err := installLaunchd("/bin/ts-autoserve", nil); err == nil || !strings.Contains(err.Error(), "launchctl bootstrap") {
+		t.Fatalf("err = %v, want a bootstrap failure", err)
+	}
+	n := 0
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "launchctl bootstrap") {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("bootstrap tried %d times, want 3", n)
+	}
+}
+
+func TestInstallRefusesBadInputBeforeWriting(t *testing.T) {
+	f := &fakeOS{}
+	home := withFakeOS(t, f)
+	_, err := Install("/bin/ts-autoserve", map[string]string{"TOKEN": "a\nExecStartPre=/bin/evil"})
+	if err == nil {
+		t.Fatal("Install accepted a value with a line break")
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("commands ran: %q", f.calls)
+	}
+	entries, _ := os.ReadDir(home)
+	if len(entries) != 0 {
+		t.Errorf("files written under HOME: %v", entries)
 	}
 }
