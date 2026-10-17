@@ -6,6 +6,8 @@
 package service
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,6 +27,9 @@ const UnitName = "ts-autoserve.service"
 // Install writes the service definition and starts it.
 // binPath is the executable to run; env entries are passed to the service.
 func Install(binPath string, env map[string]string) (string, error) {
+	if err := validate(binPath, env); err != nil {
+		return "", err
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		return installLaunchd(binPath, env)
@@ -47,6 +52,60 @@ func Uninstall() (string, error) {
 	}
 }
 
+// runCmd and sleep are swapped out by the tests, which have no launchd or
+// systemd to talk to.
+var (
+	runCmd = run
+	sleep  = time.Sleep
+)
+
+// writeDefinition writes a service file readable only by its owner: it may
+// carry a notification token. WriteFile does not change the mode of a file
+// that already exists, so the mode is set explicitly too.
+func writeDefinition(path, content string) error {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+// validate refuses what neither a plist nor a unit file can carry intact. A
+// token with a line break in it would end the systemd assignment early, and
+// whatever followed would be read as a directive of its own.
+func validate(binPath string, env map[string]string) error {
+	if binPath == "" || hasControl(binPath) {
+		return fmt.Errorf("binary path %q cannot go in a service definition", binPath)
+	}
+	for k, v := range env {
+		if !envName(k) {
+			return fmt.Errorf("environment variable name %q is not valid", k)
+		}
+		if hasControl(v) {
+			return fmt.Errorf("value of %s has a control character (a line break?); remove it before installing", k)
+		}
+	}
+	return nil
+}
+
+func envName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i, r := range k {
+		switch {
+		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
 func installLaunchd(binPath string, env map[string]string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -57,12 +116,7 @@ func installLaunchd(binPath string, env map[string]string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, Label+".plist")
-	// 0600: the file may carry a notification token. WriteFile does not change
-	// the mode of a file that already exists, so set it explicitly.
-	if err := os.WriteFile(path, []byte(plist(binPath, env)), 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := writeDefinition(path, plist(binPath, env)); err != nil {
 		return "", err
 	}
 
@@ -71,15 +125,15 @@ func installLaunchd(binPath string, env map[string]string) (string, error) {
 	// before launchd has finished tearing the job down, and bootstrapping a
 	// label that is still present fails with "Input/output error" — so wait for
 	// the old job to disappear instead of racing it.
-	_ = run("launchctl", "bootout", target+"/"+Label)
+	_ = runCmd("launchctl", "bootout", target+"/"+Label)
 	waitGone(target + "/" + Label)
 
 	var bootErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		if bootErr = run("launchctl", "bootstrap", target, path); bootErr == nil {
+		if bootErr = runCmd("launchctl", "bootstrap", target, path); bootErr == nil {
 			return path, nil
 		}
-		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+		sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}
 	return path, fmt.Errorf("launchctl bootstrap: %w", bootErr)
 }
@@ -87,10 +141,10 @@ func installLaunchd(binPath string, env map[string]string) (string, error) {
 // waitGone blocks until launchd no longer knows the service, or two seconds pass.
 func waitGone(target string) {
 	for i := 0; i < 20; i++ {
-		if err := run("launchctl", "print", target); err != nil {
+		if err := runCmd("launchctl", "print", target); err != nil {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		sleep(100 * time.Millisecond)
 	}
 }
 
@@ -100,7 +154,7 @@ func uninstallLaunchd() (string, error) {
 		return "", err
 	}
 	path := filepath.Join(home, "Library", "LaunchAgents", Label+".plist")
-	_ = run("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
+	_ = runCmd("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return path, err
 	}
@@ -117,18 +171,13 @@ func installSystemd(binPath string, env map[string]string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, UnitName)
-	// 0600: the file may carry a notification token. WriteFile does not change
-	// the mode of a file that already exists, so set it explicitly.
-	if err := os.WriteFile(path, []byte(unit(binPath, env)), 0o600); err != nil {
+	if err := writeDefinition(path, unit(binPath, env)); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return "", err
-	}
-	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
+	if err := runCmd("systemctl", "--user", "daemon-reload"); err != nil {
 		return path, fmt.Errorf("systemctl daemon-reload: %w", err)
 	}
-	if err := run("systemctl", "--user", "enable", "--now", UnitName); err != nil {
+	if err := runCmd("systemctl", "--user", "enable", "--now", UnitName); err != nil {
 		return path, fmt.Errorf("systemctl enable: %w", err)
 	}
 	return path, nil
@@ -140,11 +189,11 @@ func uninstallSystemd() (string, error) {
 		return "", err
 	}
 	path := filepath.Join(home, ".config", "systemd", "user", UnitName)
-	_ = run("systemctl", "--user", "disable", "--now", UnitName)
+	_ = runCmd("systemctl", "--user", "disable", "--now", UnitName)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return path, err
 	}
-	_ = run("systemctl", "--user", "daemon-reload")
+	_ = runCmd("systemctl", "--user", "daemon-reload")
 	return path, nil
 }
 
@@ -206,12 +255,12 @@ Documentation=https://github.com/breakzplatform/ts-autoserve
 After=tailscaled.service
 
 [Service]
-ExecStart=` + binPath + `
+ExecStart=` + execPath(binPath) + `
 Restart=always
 RestartSec=5
 `)
 	for _, k := range sortedKeys(env) {
-		b.WriteString("Environment=\"" + k + "=" + env[k] + "\"\n")
+		b.WriteString("Environment=\"" + k + "=" + systemdQuoted(env[k]) + "\"\n")
 	}
 	b.WriteString(`
 [Install]
@@ -235,8 +284,34 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
+	var b bytes.Buffer
+	xml.EscapeText(&b, []byte(s)) // writes to a bytes.Buffer cannot fail
+	return b.String()
+}
+
+// systemdQuoted escapes s for the inside of a double-quoted systemd value:
+// backslashes and quotes are C-style escapes there, and % starts a specifier.
+func systemdQuoted(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%").Replace(s)
+}
+
+// execPath writes the binary path for ExecStart. A plain path goes in as it
+// is, as it always has; one with a space or a character systemd would read
+// as syntax is quoted, and $ is doubled so it is not taken for a variable.
+func execPath(p string) string {
+	plain := true
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("/._-+@,:~", r):
+		default:
+			plain = false
+		}
+	}
+	if plain {
+		return p
+	}
+	return `"` + strings.ReplaceAll(systemdQuoted(p), "$", "$$") + `"`
 }
 
 func run(name string, args ...string) error {
