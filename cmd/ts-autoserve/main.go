@@ -78,7 +78,7 @@ func main() {
 	//   ts-autoserve service install      install and start the user service
 	//   ts-autoserve service uninstall    stop and remove it
 	//   ts-autoserve service status       is it installed and running?
-	//   ts-autoserve status [-json]       what is published, and the URLs
+	//   ts-autoserve status [-json]       what is published, the URLs and processes
 	//   ts-autoserve version
 	cmd, sub := "", ""
 	args := os.Args[1:]
@@ -143,7 +143,7 @@ Usage:
                                     to the config file; default is both)
   ts-autoserve service uninstall    stop the user service and remove it
   ts-autoserve service status       is the service installed and running?
-  ts-autoserve status [-json]       node name, published URLs, service state
+  ts-autoserve status [-json]       published URLs and the process behind each
   ts-autoserve version              print version
 
 Flags:
@@ -205,7 +205,17 @@ func statusCommand(asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	report := status.Build(node, published, managed, status.Service{
+	// The same discovery the daemon polls with names the process behind each
+	// port. Without it the report still stands, only with no processes in it.
+	listening := map[int]status.Process{}
+	ls, err := discover.Host{}.Listeners(ctx)
+	if err != nil {
+		slog.Warn("cannot list listening ports; processes are not shown", "err", err)
+	}
+	for _, l := range ls {
+		listening[l.Port] = status.Process{PID: l.PID, Name: l.Proc}
+	}
+	report := status.Build(node, published, managed, listening, status.Service{
 		Installed: st.Installed, Running: st.Running, Detail: st.Detail, File: st.Path,
 	})
 	if asJSON {
