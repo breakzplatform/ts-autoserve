@@ -116,6 +116,9 @@ ts-autoserve service install     # launchd on macOS, systemd --user on Linux
 ts-autoserve service status      # installed? running? which file, which config?
 ```
 
+Once it runs, `ts-autoserve status` lists what it published, with each URL and
+the process behind it (see [`status`](#status)).
+
 To pick a mode other than `both` at install time:
 
 ```bash
@@ -270,7 +273,7 @@ ts-autoserve [flags]              run the daemon
 ts-autoserve service install      install and start it as a user service
 ts-autoserve service uninstall    stop the user service and remove it
 ts-autoserve service status       is the service installed and running?
-ts-autoserve status [-json]       node name, published URLs, service state
+ts-autoserve status [-json]       published URLs and the process behind each
 ts-autoserve version              print version
 ```
 
@@ -286,27 +289,78 @@ watching it work before you hand it to the OS.
 | `-v` | debug logging |
 | `-json` | with `status`: print JSON instead of text |
 
-### `status -json`
+### `status`
 
-`status` only reads: it never changes the serve config. The JSON is a stable
-contract for scripts and agents (`version` changes only on a breaking change):
+`status` shows what this machine publishes right now: every HTTPS port
+tailscaled serves, its URL, where it forwards to, who published it, and the
+process listening behind it. It only reads; it never changes the serve config.
+
+```console
+$ ts-autoserve status
+node: laptop.example-tailnet.ts.net
+service: running (active)
+published:
+  https://laptop.example-tailnet.ts.net:3000/  ->  127.0.0.1:3000  (ts-autoserve)  node (pid 812)
+  https://laptop.example-tailnet.ts.net:5173/  ->  127.0.0.1:5173  (ts-autoserve)  node (pid 913)
+  https://laptop.example-tailnet.ts.net:8443/  ->  127.0.0.1:9000  (manual)        not listening
+```
+
+`ts-autoserve` marks a port this daemon published; `manual` is a mapping you
+set up yourself, which the daemon never touches. The process comes from the
+same discovery the daemon uses (`lsof` on macOS, `ss` on Linux), looked up on
+the local port the mapping forwards to. `not listening` means nothing local
+listens there right now.
+
+`status -json` prints the same report for scripts and agents:
 
 ```json
 {
   "version": 1,
   "node": "laptop.example-tailnet.ts.net",
   "endpoints": [
-    {"port": 3000, "url": "https://laptop.example-tailnet.ts.net:3000/",
-     "proxy": "http://127.0.0.1:3000", "managed": true}
+    {
+      "port": 3000,
+      "url": "https://laptop.example-tailnet.ts.net:3000/",
+      "proxy": "http://127.0.0.1:3000",
+      "managed": true,
+      "process": {"pid": 812, "name": "node"}
+    },
+    {
+      "port": 8443,
+      "url": "https://laptop.example-tailnet.ts.net:8443/",
+      "proxy": "http://127.0.0.1:9000",
+      "managed": false,
+      "process": null
+    }
   ],
-  "service": {"installed": true, "running": true, "detail": "pid 42", "file": "..."}
+  "service": {
+    "installed": true,
+    "running": true,
+    "detail": "active",
+    "file": "/home/dev/.config/systemd/user/ts-autoserve.service"
+  }
 }
 ```
 
-`endpoints` lists every HTTPS port tailscaled serves, sorted by port. `managed`
-is true for ports ts-autoserve published and false for mappings set up by hand;
-`proxy` is empty when a mapping is not a plain reverse proxy. It exits non-zero
-when tailscaled is unreachable.
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | number | Schema version, `1`. It changes only when a field is removed or changes meaning; new fields can appear without it changing, so ignore keys you don't know. |
+| `node` | string | This machine's MagicDNS name. |
+| `endpoints` | array | Every HTTPS port tailscaled serves, sorted by port. Empty array when nothing is served. |
+| `endpoints[].port` | number | The port on the tailnet. |
+| `endpoints[].url` | string | Where to open it: `https://<node>:<port>/`. |
+| `endpoints[].proxy` | string | Where the port forwards to, such as `http://127.0.0.1:3000`. Empty when the mapping is not a reverse proxy (static text or files). |
+| `endpoints[].managed` | boolean | `true` if ts-autoserve published the port, `false` for a mapping set up by hand. |
+| `endpoints[].process` | object or null | The process listening on the local port in `proxy`. `null` when nothing local listens there, or when `proxy` is not a loopback address. Added in 0.2.0. |
+| `endpoints[].process.pid` | number | Its process ID, `0` when the OS won't say (on Linux, `ss` only names processes of the user running `status`). |
+| `endpoints[].process.name` | string | Its command name as `lsof` or `ss` reports it, empty when unknown. |
+| `service.installed` | boolean | The launchd agent or systemd user unit exists. |
+| `service.running` | boolean | It is running now. |
+| `service.detail` | string | What launchd or systemd reports, such as `pid 42` or `active`. |
+| `service.file` | string | Path of the service definition, whether or not it exists. |
+
+`status` exits non-zero when tailscaled is unreachable. If listing local ports
+fails, it prints a warning on stderr and reports every `process` as `null`.
 
 ## What it will not do
 
@@ -344,10 +398,14 @@ aren't worth naming.
 ## Roadmap
 
 - **v0.1:** host ports, macOS and Linux, Telegram and webhook notifications.
-- **v0.2:** Docker containers with published ports, discovered through the Docker
+  Prebuilt binaries since v0.1.1.
+- **v0.2:** `status` and `status -json`: each published URL with the process
+  behind it, in text or in a documented JSON schema. The systemd unit is escaped
+  properly, and the tailscaled client and the service installer have tests.
+- **v0.3:** Docker containers with published ports, discovered through the Docker
   API and mapped the same way. That means one host with one port per service, not
   one tailnet device per container.
-- **v0.3:** opt-in Funnel per port, and Tailscale Services so a service can get
+- **v0.4:** opt-in Funnel per port, and Tailscale Services so a service can get
   its own MagicDNS name instead of sharing the node's.
 
 ## Security
