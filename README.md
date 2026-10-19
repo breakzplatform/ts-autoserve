@@ -68,6 +68,39 @@ the range, and `agent_ephemeral_from: 0` turns the check off.
 
 ## Install
 
+<details>
+<summary><b>Let a coding agent install it</b> (a prompt to paste; it installs in <code>agent</code> mode)</summary>
+
+The agent you already have open can do the whole thing:
+
+```text
+Install ts-autoserve on this machine so the dev servers you start are reachable
+from my phone over Tailscale:
+
+1. Download the ts-autoserve binary for this OS and CPU from
+   https://github.com/breakzplatform/ts-autoserve/releases/latest
+   (ts-autoserve_darwin_all.tar.gz on macOS, ts-autoserve_linux_amd64.tar.gz
+   or ts-autoserve_linux_arm64.tar.gz on Linux), check it against
+   checksums.txt, and put it in ~/.local/bin, making sure that is on PATH.
+2. Run `ts-autoserve -once -dry-run -v` and show me what it would publish.
+   If it fails because this user cannot change the serve config, stop and ask
+   me to run `sudo tailscale set --operator=$USER` -- that needs my password,
+   do not try it yourself.
+3. Run `ts-autoserve service install -mode agent`. That publishes only ports
+   opened by processes you started, and nothing else on my machine.
+4. Run `ts-autoserve service status` and tell me the URL pattern my ports will
+   appear at.
+
+Do not add a Telegram token or any other credential unless I give you one.
+```
+
+`-mode agent` makes sense here. When an agent runs the installer, the servers
+worth publishing are the ones it starts, and a port you opened yourself stays
+off the tailnet until you say otherwise. If you want your own dev servers
+published too, change `mode:` in the config to `both`.
+
+</details>
+
 You need Tailscale running on the machine, with
 [HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates)
 turned on for your tailnet, since Serve uses them.
@@ -137,39 +170,6 @@ dies. On a headless Linux box that nobody logs into, add
 
 The files under `packaging/` are the same definitions, if you'd rather install
 them by hand. Change the binary path in them to wherever you put it.
-
-<details>
-<summary><b>Let a coding agent install it</b> (a prompt to paste; it installs in <code>agent</code> mode)</summary>
-
-The agent you already have open can do the whole thing:
-
-```text
-Install ts-autoserve on this machine so the dev servers you start are reachable
-from my phone over Tailscale:
-
-1. Download the ts-autoserve binary for this OS and CPU from
-   https://github.com/breakzplatform/ts-autoserve/releases/latest
-   (ts-autoserve_darwin_all.tar.gz on macOS, ts-autoserve_linux_amd64.tar.gz
-   or ts-autoserve_linux_arm64.tar.gz on Linux), check it against
-   checksums.txt, and put it in ~/.local/bin, making sure that is on PATH.
-2. Run `ts-autoserve -once -dry-run -v` and show me what it would publish.
-   If it fails because this user cannot change the serve config, stop and ask
-   me to run `sudo tailscale set --operator=$USER` -- that needs my password,
-   do not try it yourself.
-3. Run `ts-autoserve service install -mode agent`. That publishes only ports
-   opened by processes you started, and nothing else on my machine.
-4. Run `ts-autoserve service status` and tell me the URL pattern my ports will
-   appear at.
-
-Do not add a Telegram token or any other credential unless I give you one.
-```
-
-`-mode agent` makes sense here. When an agent runs the installer, the servers
-worth publishing are the ones it starts, and a port you opened yourself stays
-off the tailnet until you say otherwise. If you want your own dev servers
-published too, change `mode:` in the config to `both`.
-
-</details>
 
 ## Configure
 
