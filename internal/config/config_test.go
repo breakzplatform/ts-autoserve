@@ -38,6 +38,18 @@ func TestDefaultAgentPatternAvoidsSubstringTraps(t *testing.T) {
 	}
 }
 
+func TestDefaultExcludesPortsSecurityMdCallsCatastrophic(t *testing.T) {
+	cfg, err := Load("no-such-config.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, port := range []int{9222, 2375, 2376, 3306, 4444, 5432, 5900, 6379, 27017} {
+		if !cfg.Exclude.Has(port) {
+			t.Errorf("port %d is not excluded by default", port)
+		}
+	}
+}
+
 func TestLoadRejectsBadMode(t *testing.T) {
 	cfg := Default()
 	cfg.Mode = "sometimes"
