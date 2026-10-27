@@ -122,6 +122,15 @@ func Default() Config {
 			"9222", // Chrome remote debugging: publishing it hands over the browser
 			"8384", // Syncthing UI
 			"22000",
+			// Usually passwordless on localhost; an agent that starts one would
+			// otherwise publish it to the whole tailnet. See SECURITY.md.
+			"2375-2376", // Docker API
+			"3306",      // MySQL
+			"4444",      // WebDriver / Selenium
+			"5432",      // Postgres
+			"5900",      // VNC
+			"6379",      // Redis
+			"27017",     // MongoDB
 		},
 		PortRange: []string{"3000-9999"},
 		// \b around short names: "agy" would otherwise match "strategy".

@@ -20,6 +20,13 @@ exclude_ports:
   - "9222"          # Chrome remote debugging: publishing it hands over the browser
   - "5000"          # macOS ControlCenter
   - "7000"          # macOS ControlCenter
+  - "2375-2376"     # Docker API
+  - "3306"          # MySQL
+  - "4444"          # WebDriver / Selenium
+  - "5432"          # Postgres
+  - "5900"          # VNC
+  - "6379"          # Redis
+  - "27017"         # MongoDB
 
 port_range:
   - "3000-9999"     # only used by mode "all"

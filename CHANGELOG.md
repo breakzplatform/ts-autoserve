@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The default `exclude_ports` now covers the Docker API (2375-2376), MySQL,
+  WebDriver/Selenium (4444), Postgres, VNC, Redis and MongoDB. In `agent` and
+  `both` modes, an agent that started one of them used to get it published to
+  the tailnet, although SECURITY.md lists them as ports never to share. A
+  config file that sets `exclude_ports` still replaces the whole list.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

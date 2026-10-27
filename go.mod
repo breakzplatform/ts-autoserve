@@ -2,6 +2,8 @@ module github.com/breakzplatform/ts-autoserve
 
 go 1.27.1
 
+toolchain go1.27.3
+
 require (
 	gopkg.in/yaml.v3 v3.0.1
 	tailscale.com v1.102.4
